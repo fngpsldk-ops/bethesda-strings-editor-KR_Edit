@@ -59,6 +59,17 @@ class AppSettings:
     # ── Config metadata ──────────────────────────────────────────
     config_version: int = CONFIG_VERSION
 
+    # ── Backend selector ─────────────────────────────────────────
+    # "ollama"        : local LLM via Ollama (default)
+    # "claude"        : Anthropic Claude API (model name drives selection)
+    # "openai_compat" : any OpenAI-compatible endpoint (ChatGPT, Gemini, etc.)
+    backend_type: str = "ollama"
+
+    # ── OpenAI-compatible backend ─────────────────────────────────
+    openai_compat_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    openai_compat_model: str = "gemini-2.5-flash"
+    # API key stored in SecretStore (not here) — see gui/openai_compat_client.py
+
     # ── Ollama ───────────────────────────────────────────────────
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "translategemma3-st"
@@ -593,10 +604,10 @@ def get_cache_dir() -> Path:
 
     ssd_mount = Path("/mnt/ssd")
     try:
-        is_ssd_mounted = ssd_mount.is_mount()
+        _is_mount = ssd_mount.is_mount()
     except (NotImplementedError, OSError):
-        is_ssd_mounted = False
-    if is_ssd_mounted:
+        _is_mount = False
+    if _is_mount:
         try:
             _SSD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
             return _SSD_CACHE_DIR

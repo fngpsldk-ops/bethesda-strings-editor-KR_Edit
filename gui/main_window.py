@@ -506,7 +506,6 @@ class MainWindow(QMainWindow):
         ("French",               "fr"),
         ("Italian",              "it"),
         ("Japanese",             "ja"),
-        ("Korean",               "ko"),
         ("Polish",               "pl"),
         ("Portuguese (Brazil)",  "ptbr"),
         ("Chinese (Simplified)", "zhhans"),
@@ -800,14 +799,39 @@ class MainWindow(QMainWindow):
             self._restore_window()
 
     def _init_translation_worker(self):
-        """Initialize the translation worker (Ollama or Claude depending on model)."""
+        """Initialize the translation worker (Ollama, Claude, or OpenAI-compatible)."""
         self._cleanup_workers()
         enable_protection = self.settings.enable_term_protection
         model = self.settings.ollama_model
+        backend = getattr(self.settings, "backend_type", "ollama")
 
         self.ollama_thread = QThread()
 
-        if is_claude_model(model):
+        if backend == "openai_compat":
+            from gui.openai_compat_client import get_openai_compat_api_key
+            from gui.openai_compat_worker import OpenAICompatWorker
+            api_key = get_openai_compat_api_key() or ""
+            oc_model = getattr(self.settings, "openai_compat_model", "gemini-2.5-flash")
+            oc_url = getattr(self.settings, "openai_compat_base_url",
+                             "https://generativelanguage.googleapis.com/v1beta/openai/")
+            self.ollama_worker = OpenAICompatWorker(
+                api_key=api_key,
+                model=oc_model,
+                base_url=oc_url,
+                source_lang=self.settings.default_source_lang,
+                target_lang=self.settings.default_target_lang,
+                max_workers=min(self.settings.max_workers, 8),
+                term_protector=self.term_protector if enable_protection else None,
+                translation_cache=self.translation_cache if self.settings.enable_cache else None,
+                protect_named_entities=self.settings.protect_named_entities,
+            )
+            self.ollama_worker.glossary_manager = self._glossary_manager
+            self.ollama_worker.lore_rag_manager = self._lore_rag_manager
+            self.ollama_worker.profile_manager = self._profile_manager
+            self.ollama_worker.profile_assignments = self._profile_assignments
+            self.ollama_worker.skipped_types = list(self.settings.skip_string_types)
+            logger.info("Translation worker initialized (OpenAI-compat: %s @ %s)", oc_model, oc_url)
+        elif is_claude_model(model):
             from gui.claude_client import get_api_key
             from gui.claude_translation_worker import ClaudeTranslationWorker
             api_key = get_api_key() or ""
@@ -1090,8 +1114,8 @@ class MainWindow(QMainWindow):
         self._eta_lbl.setVisible(False)
         status_bar.addPermanentWidget(self._eta_lbl)
 
-        # self._gpu_widget = GpuMonitorWidget()
-        # status_bar.addPermanentWidget(self._gpu_widget)
+        self._gpu_widget = GpuMonitorWidget()
+        status_bar.addPermanentWidget(self._gpu_widget)
 
         # Debounce timer so rapid dataChanged signals don't thrash the count loop
         self._stats_refresh_timer = QTimer(self)
