@@ -62,7 +62,7 @@ class OpenAICompatWorker(QObject):
         term_protector=None,
         translation_cache=None,
         protect_named_entities: bool = False,
-        temperature: float = 0.3,
+        temperature: float = 1.0,  # Gemini 3.x default recommended; 0.3 may cause looping
         timeout: float = 120.0,
     ) -> None:
         super().__init__()
