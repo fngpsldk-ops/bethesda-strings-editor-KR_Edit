@@ -506,6 +506,7 @@ class MainWindow(QMainWindow):
         ("French",               "fr"),
         ("Italian",              "it"),
         ("Japanese",             "ja"),
+        ("Korean",               "ko"),
         ("Polish",               "pl"),
         ("Portuguese (Brazil)",  "ptbr"),
         ("Chinese (Simplified)", "zhhans"),
@@ -1089,8 +1090,8 @@ class MainWindow(QMainWindow):
         self._eta_lbl.setVisible(False)
         status_bar.addPermanentWidget(self._eta_lbl)
 
-        self._gpu_widget = GpuMonitorWidget()
-        status_bar.addPermanentWidget(self._gpu_widget)
+        # self._gpu_widget = GpuMonitorWidget()
+        # status_bar.addPermanentWidget(self._gpu_widget)
 
         # Debounce timer so rapid dataChanged signals don't thrash the count loop
         self._stats_refresh_timer = QTimer(self)

@@ -592,7 +592,11 @@ def get_cache_dir() -> Path:
             logger.warning("Cannot use cache dir override %s: %s — using default", override, e)
 
     ssd_mount = Path("/mnt/ssd")
-    if ssd_mount.is_mount():
+    try:
+        is_ssd_mounted = ssd_mount.is_mount()
+    except (NotImplementedError, OSError):
+        is_ssd_mounted = False
+    if is_ssd_mounted:
         try:
             _SSD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
             return _SSD_CACHE_DIR

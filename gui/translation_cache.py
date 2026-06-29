@@ -164,10 +164,11 @@ class TranslationCache:
 
     @staticmethod
     def make_key(
-        original_text: str, model: str, source_lang: str, target_lang: str
+        original_text: str, model: str, source_lang: str, target_lang: str,
+        settings_hash: str = "",
     ) -> str:
         """Build a stable cache key from the relevant request parameters."""
-        raw = f"{model}\x00{source_lang}\x00{target_lang}\x00{original_text}"
+        raw = f"{model}\x00{source_lang}\x00{target_lang}\x00{settings_hash}\x00{original_text}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> Optional[str]:

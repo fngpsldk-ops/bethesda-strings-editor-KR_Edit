@@ -1229,8 +1229,13 @@ class SettingsDialog(QDialog):
 
     def _start_model_fetch(self, *, manual: bool) -> None:
         """Spawn a background /api/tags fetch (no-op if one is already running)."""
-        if self._model_fetcher is not None and self._model_fetcher.isRunning():
-            return  # don't pile up overlapping requests
+        if self._model_fetcher is not None:
+            try:
+                if self._model_fetcher.isRunning():
+                    return  # don't pile up overlapping requests
+            except RuntimeError:
+                pass  # C++ object already deleted
+            self._model_fetcher = None
         url = self.ollama_url.text().strip()
         if not url:
             if manual:
@@ -1575,7 +1580,15 @@ class SettingsDialog(QDialog):
         self._dirty = True
 
     def accept(self):
-        self._dirty = False  # saved — no warning needed on subsequent close
+        self._dirty = False
+        if self._model_fetcher is not None:
+            try:
+                if self._model_fetcher.isRunning():
+                    self._model_fetcher.quit()
+                    self._model_fetcher.wait(2000)
+            except RuntimeError:
+                pass  # C++ object already deleted
+        self._model_fetcher = None
         super().accept()
 
     def reject(self):

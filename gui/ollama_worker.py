@@ -371,11 +371,15 @@ _LANG_EXAMPLES: dict[tuple[str, str], str] = {
         "Mining Equipment → 採掘装備"
     ),
     ("en", "ko"): (
-        "I'm heading to New Atlantis to meet with Sarah. "
+        "I'm heading to New Atlantis to meet with Sarah."
         "→ 사라를 만나러 뉴 애틀랜티스로 향하고 있습니다.\n"
-        "[FAILED] Access denied. Entry unauthorized. "
-        "→ [실패] 접근이 거부되었습니다. 입장이 승인되지 않았습니다.\n"
-        "Mining Equipment → 채굴 장비"
+        "Mining Equipment → 채굴 장비\n"
+        "Knock yourself out. → 마음껏 하세요.\n"
+        "Consider it done. → 알겠습니다.\n"
+        "What you hailing for? Land in the Key, or don't. Sheesh."
+        "→ 무슨 용건입니까? 더 키에 착륙하시든지 말든지요. 어휴.\n"
+        "Fleet vessel ID recognized. Welcome home to the Key."
+        "→ 함대 함선 ID 확인됐습니다. 더 키에 오신 걸 환영합니다."
     ),
     ("en", "pl"): (
         "I'm heading to New Atlantis to meet with Sarah. "
@@ -575,6 +579,11 @@ class TranslationRequest:
             "5. Preserve leading and trailing spaces exactly as in the source.\n"
             "6. Match source punctuation and capitalization exactly.\n"
             "7. Translate content inside parentheses () — do not leave it in the source language.\n"
+            "8. CRITICAL: Output the Korean translation ONLY. Never add English explanations, "
+            "notes, alternatives, or meta-commentary such as '(More appropriately...)' or "
+            "'(A better translation would be...)'. If you are unsure, output your single best "
+            "Korean translation with nothing after it.\n"
+            "9. Never output the same translation twice. Produce exactly one translation per input.\n"
         )
 
         # Source-language note (e.g. Russian needs a "don't transliterate" reminder).
@@ -858,7 +867,7 @@ class OllamaWorker(QObject):
         self.profile_assignments = None # bethesda_strings.character_profiles.ProfileAssignments (optional)
         # StringType names to skip (e.g. ["BOOK", "NOTE"]). Set from AppSettings.
         self.skipped_types: list = []
-
+
         logger.info(
             f"OllamaWorker initialized: url={self.base_url}, model={self.model}, "
             f"term_protection={enable_term_protection}, max_workers={self.max_workers}, "
@@ -875,6 +884,27 @@ class OllamaWorker(QObject):
         _preload_it_dict()
         _preload_pl_dict()
         _preload_ptbr_dict()
+
+    def _compute_settings_hash(self) -> str:
+        """Short hash of glossary + prompt version.
+
+        When this value changes, cache keys change so old translations
+        are automatically re-translated.
+        - glossary changes -> hash changes automatically
+        - prompt rule changes -> bump PROMPT_VERSION below
+        """
+        import hashlib as _hl
+        PROMPT_VERSION = 1  # bump this when you change prompt rules
+        parts = [f"pv{PROMPT_VERSION}"]
+        if self.glossary_manager is not None:
+            try:
+                entries = self.glossary_manager.get_all_entries()
+                for e in sorted(entries, key=lambda x: x.source_term):
+                    parts.append(f"{e.source_term}={e.target_term}")
+            except Exception:
+                pass
+        combined = "\n".join(parts)
+        return _hl.sha256(combined.encode("utf-8")).hexdigest()[:12]
 
     def _get_model_config(self, model_name: Optional[str] = None) -> Dict[str, Any]:
         """Return the best-matching config for *model_name* (or the worker's model).
@@ -1065,6 +1095,9 @@ class OllamaWorker(QObject):
         failed = 0
         completed_count = 0
 
+        # Settings hash (glossary + prompt version) for cache invalidation
+        self._settings_hash = self._compute_settings_hash()
+
         # ── Pre-flight scan ───────────────────────────────────────────────────
         # Resolve every request that can be answered without calling Ollama:
         # no-trans patterns, exact TM hits, and cache hits.  Each hit skips a
@@ -1120,7 +1153,8 @@ class OllamaWorker(QObject):
             # Cache lookup
             if not is_retry and self.translation_cache:
                 cache_key = TranslationCache.make_key(
-                    req.original_text, self.model, req.source_lang, req.target_lang
+                    req.original_text, self.model, req.source_lang, req.target_lang,
+                    settings_hash=self._settings_hash,
                 )
                 cached = self.translation_cache.get(cache_key)
                 if cached:
@@ -1620,7 +1654,8 @@ class OllamaWorker(QObject):
         effective_model = req.model_override or self.model
         if self.translation_cache is not None:
             cache_key = TranslationCache.make_key(
-                req.original_text, effective_model, req.source_lang, req.target_lang
+                req.original_text, self.model, req.source_lang, req.target_lang,
+                settings_hash=self._settings_hash,
             )
             if not is_retry:
                 cached = self.translation_cache.get(cache_key)
