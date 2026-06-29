@@ -254,7 +254,7 @@ class OpenAICompatWorker(QObject):
 
             # Store in cache
             if cache_key and self.translation_cache:
-                self.translation_cache.put(cache_key, result)
+                self.translation_cache.set(cache_key, result)
 
             return req.index, result, req.string_id
 
