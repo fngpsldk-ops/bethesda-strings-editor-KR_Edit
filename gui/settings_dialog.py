@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QSpinBox, QCheckBox,
-    QPushButton, QDialogButtonBox, QGroupBox, QLabel, QRadioButton,
+    QPushButton, QDialogButtonBox, QGroupBox, QLabel, QRadioButton, QCheckBox,
     QMessageBox, QApplication, QSlider, QWidget, QScrollArea, QFrame,
     QFileDialog,
 )
@@ -210,14 +210,39 @@ class SettingsDialog(QDialog):
         self.cloud_base_url.setPlaceholderText("https://generativelanguage.googleapis.com/v1beta/openai/")
         cloud_layout.addRow(self.tr("API Base URL:"), self.cloud_base_url)
 
-        self.cloud_model = QLineEdit()
-        self.cloud_model.setPlaceholderText("gemini-3.5-flash")
+        # Model combo with presets (editable for custom models)
+        self.cloud_model = QComboBox()
+        self.cloud_model.setEditable(True)
+        _CLOUD_MODEL_PRESETS = [
+            # ── Gemini ──────────────────────────────────────
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            # ── OpenAI / ChatGPT ────────────────────────────
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+        ]
+        self.cloud_model.addItems(_CLOUD_MODEL_PRESETS)
+        self.cloud_model.setCurrentText("gemini-3.5-flash")
         cloud_layout.addRow(self.tr("Model:"), self.cloud_model)
 
+        # API Key with show/hide checkbox
         self.cloud_api_key = QLineEdit()
         self.cloud_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.cloud_api_key.setPlaceholderText(self.tr("Enter API key (stored securely)"))
-        cloud_layout.addRow(self.tr("API Key:"), self.cloud_api_key)
+        self.chk_show_api_key = QCheckBox(self.tr("Show key"))
+        self.chk_show_api_key.toggled.connect(
+            lambda checked: self.cloud_api_key.setEchoMode(
+                QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+            )
+        )
+        api_key_row = QHBoxLayout()
+        api_key_row.addWidget(self.cloud_api_key, stretch=1)
+        api_key_row.addWidget(self.chk_show_api_key)
+        cloud_layout.addRow(self.tr("API Key:"), api_key_row)
 
         self.cloud_group.setLayout(cloud_layout)
         layout.addWidget(self.cloud_group)
@@ -229,7 +254,7 @@ class SettingsDialog(QDialog):
         else:
             self.radio_local.setChecked(True)
         self.cloud_base_url.setText(getattr(self._settings, "openai_compat_base_url", ""))
-        self.cloud_model.setText(getattr(self._settings, "openai_compat_model", "gemini-3.5-flash"))
+        self.cloud_model.setCurrentText(getattr(self._settings, "openai_compat_model", "gemini-3.5-flash"))
         # Load API key from SecretStore
         try:
             from gui.openai_compat_client import get_openai_compat_api_key
@@ -1717,7 +1742,7 @@ class SettingsDialog(QDialog):
         # Backend type
         settings.backend_type = "openai_compat" if self.radio_cloud.isChecked() else "ollama"
         settings.openai_compat_base_url = self.cloud_base_url.text().strip().rstrip('/') + '/'
-        settings.openai_compat_model = self.cloud_model.text().strip() or "gemini-3.5-flash"
+        settings.openai_compat_model = self.cloud_model.currentText().strip() or "gemini-3.5-flash"
         # Save API key to SecretStore
         key_text = self.cloud_api_key.text().strip()
         if key_text:
