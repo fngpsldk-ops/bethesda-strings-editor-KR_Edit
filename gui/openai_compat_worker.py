@@ -88,9 +88,6 @@ class OpenAICompatWorker(QObject):
         self._stop_flag = False
         self._mutex = QMutex()
 
-        # Client is created lazily on first use so the app can start
-        # even if the API key has not been configured yet.
-        self._client = None
 
         # Compute settings hash once (glossary + prompt version) for cache keys.
         self._settings_hash = self._compute_settings_hash()
@@ -106,22 +103,26 @@ class OpenAICompatWorker(QObject):
             if hasattr(self, key):
                 setattr(self, key, val)
 
-    # ── client (lazy) ─────────────────────────────────────────────────────────────
-    def _get_client(self):
-        """Return (or create) the OpenAI-compatible client.  Raises on missing key."""
-        if self._client is None:
-            if not self.api_key:
-                raise RuntimeError(
-                    "OpenAI-compatible API key is not set.\n"
-                    "Please enter your API key in Settings > Cloud AI Backend."
-                )
-            from openai import OpenAI
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                timeout=self.timeout,
+    # ── client factory ────────────────────────────────────────────────────────────
+    def _make_client(self):
+        """Create a NEW OpenAI-compatible client per call.
+
+        A fresh client is created for each translation request instead of sharing
+        one instance across threads.  This avoids httpx connection-pool conflicts
+        when multiple ThreadPoolExecutor workers run concurrently.
+        Raises RuntimeError if the API key is not configured.
+        """
+        if not self.api_key:
+            raise RuntimeError(
+                "OpenAI-compatible API key is not set.\n"
+                "Please enter your API key in Settings > Cloud AI Backend."
             )
-        return self._client
+        from openai import OpenAI
+        return OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=self.timeout,
+        )
 
     # ── settings hash (cache invalidation) ─────────────────────────────────────
     def _compute_settings_hash(self) -> str:
@@ -226,7 +227,7 @@ class OpenAICompatWorker(QObject):
 
             # OpenAI-compatible Chat Completions call
             try:
-                resp = self._get_client().chat.completions.create(
+                resp = self._make_client().chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
