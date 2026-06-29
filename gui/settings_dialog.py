@@ -239,8 +239,9 @@ class SettingsDialog(QDialog):
             pass
 
         # Show/hide groups based on selection
+        # Note: _on_backend_toggled() is called at the END of _setup_ui()
+        # after ollama_group is created, so we only connect the signal here.
         self.radio_local.toggled.connect(self._on_backend_toggled)
-        self._on_backend_toggled()  # initial state
 
         # Ollama Configuration
         self.ollama_group = QGroupBox(self.tr("Ollama AI Settings"))
@@ -1193,6 +1194,7 @@ class SettingsDialog(QDialog):
 
         # Dialog buttons (kept outside scroll area)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self._on_backend_toggled()  # apply initial show/hide after all groups created
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root_layout.addWidget(buttons)
@@ -1631,6 +1633,8 @@ class SettingsDialog(QDialog):
 
     def _on_backend_toggled(self) -> None:
         """Show/hide Ollama vs Cloud AI settings based on backend selection."""
+        if not hasattr(self, "ollama_group") or not hasattr(self, "cloud_group"):
+            return  # called before ollama_group is created — skip
         is_local = self.radio_local.isChecked()
         self.ollama_group.setVisible(is_local)
         self.cloud_group.setVisible(not is_local)
