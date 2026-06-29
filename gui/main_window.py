@@ -511,6 +511,7 @@ class MainWindow(QMainWindow):
         ("Chinese (Simplified)", "zhhans"),
         ("Russian",              "ru"),
         ("Ukrainian",            "uk"),
+        ("Korean",               "ko"),
     ]
 
     def __init__(self, settings: Optional[AppSettings] = None, parent=None, theme_manager=None):
