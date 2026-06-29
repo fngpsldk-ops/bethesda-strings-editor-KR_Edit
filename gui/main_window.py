@@ -597,6 +597,7 @@ class MainWindow(QMainWindow):
         )
 
         self._translation_stopping = False
+        self._self_review_enabled_for_batch = True  # False for translate_selected, True for translate_all
 
         # Glossary manager
         self._glossary_manager = None
@@ -2920,6 +2921,7 @@ class MainWindow(QMainWindow):
                     )
                 )
 
+        self._self_review_enabled_for_batch = False
         self._start_translation(indices)
 
     @Slot()
@@ -2929,6 +2931,7 @@ class MainWindow(QMainWindow):
             return
 
         indices = list(range(self.table_model.rowCount()))
+        self._self_review_enabled_for_batch = True
         self._start_translation(indices)
 
     def _start_translation(self, indices):
@@ -3421,6 +3424,7 @@ class MainWindow(QMainWindow):
             and self.current_file
             and not self._translation_stopping
             and getattr(self.settings, "auto_self_review", True)
+            and self._self_review_enabled_for_batch
         ):
             self._self_review_begin(successful, failed)
             return
