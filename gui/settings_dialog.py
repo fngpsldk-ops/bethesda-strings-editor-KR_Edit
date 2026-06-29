@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QSpinBox, QCheckBox,
-    QPushButton, QDialogButtonBox, QGroupBox, QLabel,
+    QPushButton, QDialogButtonBox, QGroupBox, QLabel, QRadioButton,
     QMessageBox, QApplication, QSlider, QWidget, QScrollArea, QFrame,
     QFileDialog,
 )
@@ -191,6 +191,56 @@ class SettingsDialog(QDialog):
         content.setAttribute(Qt.WA_StyledBackground, True)
         content.setStyleSheet("QWidget#SettingsDialogContent { background: transparent; }")
         layout = QVBoxLayout(content)
+
+        # ── Translation Backend Selector ─────────────────────────────────
+        backend_group = QGroupBox(self.tr("Translation Backend"))
+        backend_layout = QVBoxLayout()
+        self.radio_local = QRadioButton(self.tr("Local LLM (Ollama)"))
+        self.radio_cloud = QRadioButton(self.tr("Cloud AI (OpenAI-compatible: Gemini, ChatGPT, etc.)"))
+        backend_layout.addWidget(self.radio_local)
+        backend_layout.addWidget(self.radio_cloud)
+        backend_group.setLayout(backend_layout)
+        layout.addWidget(backend_group)
+
+        # ── Cloud AI Settings ─────────────────────────────────────────────
+        self.cloud_group = QGroupBox(self.tr("Cloud AI Settings"))
+        cloud_layout = QFormLayout()
+
+        self.cloud_base_url = QLineEdit()
+        self.cloud_base_url.setPlaceholderText("https://generativelanguage.googleapis.com/v1beta/openai/")
+        cloud_layout.addRow(self.tr("API Base URL:"), self.cloud_base_url)
+
+        self.cloud_model = QLineEdit()
+        self.cloud_model.setPlaceholderText("gemini-3.5-flash")
+        cloud_layout.addRow(self.tr("Model:"), self.cloud_model)
+
+        self.cloud_api_key = QLineEdit()
+        self.cloud_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.cloud_api_key.setPlaceholderText(self.tr("Enter API key (stored securely)"))
+        cloud_layout.addRow(self.tr("API Key:"), self.cloud_api_key)
+
+        self.cloud_group.setLayout(cloud_layout)
+        layout.addWidget(self.cloud_group)
+
+        # Initial values
+        current_backend = getattr(self._settings, "backend_type", "ollama")
+        if current_backend == "openai_compat":
+            self.radio_cloud.setChecked(True)
+        else:
+            self.radio_local.setChecked(True)
+        self.cloud_base_url.setText(getattr(self._settings, "openai_compat_base_url", ""))
+        self.cloud_model.setText(getattr(self._settings, "openai_compat_model", "gemini-3.5-flash"))
+        # Load API key from SecretStore
+        try:
+            from gui.openai_compat_client import get_openai_compat_api_key
+            saved_key = get_openai_compat_api_key() or ""
+            self.cloud_api_key.setText(saved_key)
+        except Exception:
+            pass
+
+        # Show/hide groups based on selection
+        self.radio_local.toggled.connect(self._on_backend_toggled)
+        self._on_backend_toggled()  # initial state
 
         # Ollama Configuration
         self.ollama_group = QGroupBox(self.tr("Ollama AI Settings"))
@@ -1579,6 +1629,12 @@ class SettingsDialog(QDialog):
     def _mark_dirty(self, *_args) -> None:
         self._dirty = True
 
+    def _on_backend_toggled(self) -> None:
+        """Show/hide Ollama vs Cloud AI settings based on backend selection."""
+        is_local = self.radio_local.isChecked()
+        self.ollama_group.setVisible(is_local)
+        self.cloud_group.setVisible(not is_local)
+
     def accept(self):
         self._dirty = False
         if self._model_fetcher is not None:
@@ -1654,6 +1710,18 @@ class SettingsDialog(QDialog):
 
     def apply_to_settings(self, settings: AppSettings) -> None:
         """Apply dialog values to the given AppSettings instance."""
+        # Backend type
+        settings.backend_type = "openai_compat" if self.radio_cloud.isChecked() else "ollama"
+        settings.openai_compat_base_url = self.cloud_base_url.text().strip().rstrip('/') + '/'
+        settings.openai_compat_model = self.cloud_model.text().strip() or "gemini-3.5-flash"
+        # Save API key to SecretStore
+        key_text = self.cloud_api_key.text().strip()
+        if key_text:
+            try:
+                from gui.openai_compat_client import set_openai_compat_api_key
+                set_openai_compat_api_key(key_text)
+            except Exception:
+                pass
         settings.ollama_url = self.ollama_url.text().rstrip('/')
         settings.ollama_model = self.ollama_model.currentText()
         settings.ollama_num_predict = self.spin_num_predict.value()
