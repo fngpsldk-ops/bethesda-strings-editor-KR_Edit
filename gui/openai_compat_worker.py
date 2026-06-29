@@ -103,26 +103,40 @@ class OpenAICompatWorker(QObject):
             if hasattr(self, key):
                 setattr(self, key, val)
 
-    # ── client factory ────────────────────────────────────────────────────────────
-    def _make_client(self):
-        """Create a NEW OpenAI-compatible client per call.
+    # ── API call (requests-based, avoids httpx/Qt SSL conflict) ─────────────────
+    def _call_api(self, system_prompt: str, user_prompt: str) -> str:
+        """Call OpenAI-compatible Chat Completions API using requests.
 
-        A fresh client is created for each translation request instead of sharing
-        one instance across threads.  This avoids httpx connection-pool conflicts
-        when multiple ThreadPoolExecutor workers run concurrently.
-        Raises RuntimeError if the API key is not configured.
+        Uses the `requests` library instead of the openai SDK to avoid
+        httpx/Qt SSL conflicts that cause "Connection error" in threaded contexts.
         """
         if not self.api_key:
             raise RuntimeError(
                 "OpenAI-compatible API key is not set.\n"
                 "Please enter your API key in Settings > Cloud AI Backend."
             )
-        from openai import OpenAI
-        return OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
+        import requests
+        import json
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": self.temperature,
+        }
+        resp = requests.post(
+            url, headers=headers,
+            data=json.dumps(payload),
             timeout=self.timeout,
         )
+        resp.raise_for_status()
+        return (resp.json()["choices"][0]["message"]["content"] or "").strip()
 
     # ── settings hash (cache invalidation) ─────────────────────────────────────
     def _compute_settings_hash(self) -> str:
@@ -225,17 +239,9 @@ class OpenAICompatWorker(QObject):
                 logger.error("Prompt build failed idx=%d: %s", req.index, exc)
                 return req.index, None, req.string_id
 
-            # OpenAI-compatible Chat Completions call
+            # OpenAI-compatible Chat Completions call (via requests)
             try:
-                resp = self._make_client().chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=self.temperature,
-                )
-                result = (resp.choices[0].message.content or "").strip()
+                result = self._call_api(system_prompt, user_prompt)
             except Exception as exc:
                 logger.error(
                     "OpenAI-compat translation error idx=%d string_id=%s: %s",
