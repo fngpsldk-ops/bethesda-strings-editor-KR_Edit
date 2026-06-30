@@ -891,6 +891,12 @@ class MainWindow(QMainWindow):
                 self.ollama_thread.terminate()
         self.ollama_thread = None
         self.ollama_worker = None
+        # IMPORTANT: reset the connection flag so _connect_worker_signals()
+        # actually wires up signals for the NEW worker object created next.
+        # Without this, switching backends (e.g. Ollama -> OpenAI-compat) leaves
+        # the new worker with translation_requested never connected, so
+        # translate_batch() is silently never invoked.
+        self._worker_signals_connected = False
 
     def _setup_ui(self):
         """Initialize user interface."""
