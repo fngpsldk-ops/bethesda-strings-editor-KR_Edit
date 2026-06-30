@@ -1149,34 +1149,6 @@ class StringItemDelegate(QStyledItemDelegate):
 
         editor = QLineEdit(parent)
         editor.setFrame(False)
-        # BSEK fix: explicitly inherit the table's text/background colors.
-        # QLineEdit editors created here do not automatically pick up the
-        # QTableView { color: ...; background-color: ...; } rule from the
-        # active theme stylesheet, so on dark themes the editor falls back to
-        # the OS default (often near-black) text on a dark background and
-        # becomes unreadable while editing/viewing a selected cell.
-        _table = parent
-        while _table is not None and not isinstance(_table, QAbstractItemView):
-            _table = _table.parent()
-        if _table is not None:
-            _pal = _table.palette()
-            _text_color = _pal.color(_pal.ColorRole.Text).name()
-            _bg_color = _pal.color(_pal.ColorRole.Base).name()
-        else:
-            # Fallback: could not walk up to a QAbstractItemView — use the
-            # application-wide palette instead of leaving OS defaults.
-            _pal = QApplication.palette()
-            _text_color = _pal.color(_pal.ColorRole.Text).name()
-            _bg_color = _pal.color(_pal.ColorRole.Base).name()
-        editor.setStyleSheet(
-            f"QLineEdit {{ color: {_text_color}; background-color: {_bg_color}; "
-            f"selection-background-color: palette(highlight); }}"
-        )
-        logger.info(
-            "[DIAG] createEditor: parent=%s resolved_table=%s text=%s bg=%s",
-            type(parent).__name__, type(_table).__name__ if _table else None,
-            _text_color, _bg_color,
-        )
 
         if col_name == "Translated" and self._completion_source is not None:
             words = self._completion_source()

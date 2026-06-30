@@ -24,7 +24,7 @@ QToolBar { background-color: #334155; border-bottom: 1px solid #475569; spacing:
 QToolBar QToolButton { color: #f1f5f9; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #475569; }
 QStatusBar { background-color: #334155; color: #94a3b8; border-top: 1px solid #475569; }
-QTableView { background-color: #1e293b; color: #f1f5f9; gridline-color: #334155; selection-background-color: #3b82f6; selection-color: white; alternate-background-color: #262f45; }
+QTableView { background-color: #1e293b; color: #f1f5f9; gridline-color: #334155; selection-background-color: #3b82f6; selection-color: #f1f5f9; alternate-background-color: #262f45; }
 QHeaderView::section { background-color: #334155; color: #f1f5f9; padding: 4px; border: none; border-right: 1px solid #475569; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #475569; color: #f1f5f9; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -73,7 +73,7 @@ QToolBar { background-color: #1e293b; border-bottom: 1px solid #334155; spacing:
 QToolBar QToolButton { color: #e2e8f0; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #334155; }
 QStatusBar { background-color: #1e293b; color: #64748b; border-top: 1px solid #334155; }
-QTableView { background-color: #0f172a; color: #e2e8f0; gridline-color: #1e293b; selection-background-color: #2563eb; selection-color: white; alternate-background-color: #151d2e; }
+QTableView { background-color: #0f172a; color: #e2e8f0; gridline-color: #1e293b; selection-background-color: #2563eb; selection-color: #e2e8f0; alternate-background-color: #151d2e; }
 QHeaderView::section { background-color: #1e293b; color: #e2e8f0; padding: 4px; border: none; border-right: 1px solid #334155; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #334155; color: #e2e8f0; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -171,7 +171,7 @@ QToolBar { background-color: #343746; border-bottom: 1px solid #44475a; spacing:
 QToolBar QToolButton { color: #f8f8f2; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #44475a; }
 QStatusBar { background-color: #343746; color: #bd93f9; border-top: 1px solid #44475a; }
-QTableView { background-color: #282a36; color: #f8f8f2; gridline-color: #343746; selection-background-color: #bd93f9; selection-color: #282a36; alternate-background-color: #2d2f3d; }
+QTableView { background-color: #282a36; color: #f8f8f2; gridline-color: #343746; selection-background-color: #bd93f9; selection-color: #f8f8f2; alternate-background-color: #2d2f3d; }
 QHeaderView::section { background-color: #343746; color: #f8f8f2; padding: 4px; border: none; border-right: 1px solid #44475a; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #44475a; color: #f8f8f2; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -220,7 +220,7 @@ QToolBar { background-color: #313244; border-bottom: 1px solid #45475a; spacing:
 QToolBar QToolButton { color: #cdd6f4; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #45475a; }
 QStatusBar { background-color: #313244; color: #a6adc8; border-top: 1px solid #45475a; }
-QTableView { background-color: #1e1e2e; color: #cdd6f4; gridline-color: #313244; selection-background-color: #89b4fa; selection-color: #1e1e2e; alternate-background-color: #262638; }
+QTableView { background-color: #1e1e2e; color: #cdd6f4; gridline-color: #313244; selection-background-color: #89b4fa; selection-color: #cdd6f4; alternate-background-color: #262638; }
 QHeaderView::section { background-color: #313244; color: #cdd6f4; padding: 4px; border: none; border-right: 1px solid #45475a; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #45475a; color: #cdd6f4; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -269,7 +269,7 @@ QToolBar { background-color: #ffffff; border-bottom: 1px solid #e2e8f0; spacing:
 QToolBar QToolButton { color: #1e293b; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #f1f5f9; }
 QStatusBar { background-color: #ffffff; color: #64748b; border-top: 1px solid #e2e8f0; }
-QTableView { background-color: #ffffff; color: #1e293b; gridline-color: #e2e8f0; selection-background-color: #3b82f6; selection-color: white; alternate-background-color: #f8fafc; }
+QTableView { background-color: #ffffff; color: #1e293b; gridline-color: #e2e8f0; selection-background-color: #3b82f6; selection-color: #1e293b; alternate-background-color: #f8fafc; }
 QHeaderView::section { background-color: #f1f5f9; color: #1e293b; padding: 4px; border: none; border-right: 1px solid #e2e8f0; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #e2e8f0; color: #1e293b; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -318,7 +318,7 @@ QToolBar { background-color: #073642; border-bottom: 1px solid #586e75; spacing:
 QToolBar QToolButton { color: #839496; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #586e75; }
 QStatusBar { background-color: #073642; color: #586e75; border-top: 1px solid #586e75; }
-QTableView { background-color: #002b36; color: #839496; gridline-color: #073642; selection-background-color: #268bd2; selection-color: #002b36; alternate-background-color: #03333f; }
+QTableView { background-color: #002b36; color: #839496; gridline-color: #073642; selection-background-color: #268bd2; selection-color: #839496; alternate-background-color: #03333f; }
 QHeaderView::section { background-color: #073642; color: #839496; padding: 4px; border: none; border-right: 1px solid #586e75; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #586e75; color: #fdf6e3; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -366,7 +366,7 @@ QToolBar { background-color: #3c3836; border-bottom: 1px solid #504945; spacing:
 QToolBar QToolButton { color: #ebdbb2; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #504945; }
 QStatusBar { background-color: #3c3836; color: #a89984; border-top: 1px solid #504945; }
-QTableView { background-color: #282828; color: #ebdbb2; gridline-color: #3c3836; selection-background-color: #d79921; selection-color: #282828; alternate-background-color: #32302f; }
+QTableView { background-color: #282828; color: #ebdbb2; gridline-color: #3c3836; selection-background-color: #d79921; selection-color: #ebdbb2; alternate-background-color: #32302f; }
 QHeaderView::section { background-color: #3c3836; color: #ebdbb2; padding: 4px; border: none; border-right: 1px solid #504945; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #504945; color: #ebdbb2; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -414,7 +414,7 @@ QToolBar { background-color: #16161e; border-bottom: 1px solid #292e42; spacing:
 QToolBar QToolButton { color: #c0caf5; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #292e42; }
 QStatusBar { background-color: #16161e; color: #565f89; border-top: 1px solid #292e42; }
-QTableView { background-color: #1a1b26; color: #c0caf5; gridline-color: #16161e; selection-background-color: #7aa2f7; selection-color: #1a1b26; alternate-background-color: #1e2030; }
+QTableView { background-color: #1a1b26; color: #c0caf5; gridline-color: #16161e; selection-background-color: #7aa2f7; selection-color: #c0caf5; alternate-background-color: #1e2030; }
 QHeaderView::section { background-color: #16161e; color: #c0caf5; padding: 4px; border: none; border-right: 1px solid #292e42; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #292e42; color: #c0caf5; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -462,7 +462,7 @@ QToolBar { background-color: #3e3d32; border-bottom: 1px solid #75715e; spacing:
 QToolBar QToolButton { color: #f8f8f2; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #49483e; }
 QStatusBar { background-color: #3e3d32; color: #75715e; border-top: 1px solid #49483e; }
-QTableView { background-color: #272822; color: #f8f8f2; gridline-color: #3e3d32; selection-background-color: #a6e22e; selection-color: #272822; alternate-background-color: #2d2c27; }
+QTableView { background-color: #272822; color: #f8f8f2; gridline-color: #3e3d32; selection-background-color: #a6e22e; selection-color: #f8f8f2; alternate-background-color: #2d2c27; }
 QHeaderView::section { background-color: #3e3d32; color: #f8f8f2; padding: 4px; border: none; border-right: 1px solid #75715e; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #49483e; color: #f8f8f2; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -510,7 +510,7 @@ QToolBar { background-color: #21252b; border-bottom: 1px solid #3e4451; spacing:
 QToolBar QToolButton { color: #abb2bf; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #3e4451; }
 QStatusBar { background-color: #21252b; color: #636d83; border-top: 1px solid #3e4451; }
-QTableView { background-color: #282c34; color: #abb2bf; gridline-color: #21252b; selection-background-color: #61afef; selection-color: #282c34; alternate-background-color: #2c313c; }
+QTableView { background-color: #282c34; color: #abb2bf; gridline-color: #21252b; selection-background-color: #61afef; selection-color: #abb2bf; alternate-background-color: #2c313c; }
 QHeaderView::section { background-color: #21252b; color: #abb2bf; padding: 4px; border: none; border-right: 1px solid #3e4451; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #3e4451; color: #abb2bf; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -558,7 +558,7 @@ QToolBar { background-color: #eee8d5; border-bottom: 1px solid #93a1a1; spacing:
 QToolBar QToolButton { color: #657b83; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #d4cdb8; }
 QStatusBar { background-color: #eee8d5; color: #93a1a1; border-top: 1px solid #93a1a1; }
-QTableView { background-color: #fdf6e3; color: #657b83; gridline-color: #eee8d5; selection-background-color: #268bd2; selection-color: #fdf6e3; alternate-background-color: #f9f2de; }
+QTableView { background-color: #fdf6e3; color: #657b83; gridline-color: #eee8d5; selection-background-color: #268bd2; selection-color: #657b83; alternate-background-color: #f9f2de; }
 QHeaderView::section { background-color: #eee8d5; color: #657b83; padding: 4px; border: none; border-right: 1px solid #93a1a1; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #d4cdb8; color: #586e75; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -606,7 +606,7 @@ QToolBar { background-color: #ede3c8; border-bottom: 1px solid #c8b89a; spacing:
 QToolBar QToolButton { color: #3b2e1e; border-radius: 4px; }
 QToolBar QToolButton:hover { background-color: #d8caa8; }
 QStatusBar { background-color: #ede3c8; color: #7a6856; border-top: 1px solid #c8b89a; }
-QTableView { background-color: #f4edd6; color: #3b2e1e; gridline-color: #e0d4b4; selection-background-color: #c67c2f; selection-color: #f4edd6; alternate-background-color: #f0e8cc; }
+QTableView { background-color: #f4edd6; color: #3b2e1e; gridline-color: #e0d4b4; selection-background-color: #c67c2f; selection-color: #3b2e1e; alternate-background-color: #f0e8cc; }
 QHeaderView::section { background-color: #ede3c8; color: #3b2e1e; padding: 4px; border: none; border-right: 1px solid #c8b89a; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #d8caa8; color: #3b2e1e; border: none; border-radius: 4px; padding: 6px 12px; }
@@ -669,7 +669,7 @@ QToolBar { background-color: #111a28; border-bottom: 1px solid #1c2e48; spacing:
 QToolBar QToolButton { color: #c0c8d8; border-radius: 2px; }
 QToolBar QToolButton:hover { background-color: #1c2e48; color: #3ff0ff; }
 QStatusBar { background-color: #111a28; color: #556688; border-top: 1px solid #1c2e48; }
-QTableView { background-color: #0a0e1a; color: #ececec; gridline-color: #1c2e48; selection-background-color: #152030; selection-color: #3ff0ff; alternate-background-color: #0e1420; }
+QTableView { background-color: #0a0e1a; color: #ececec; gridline-color: #1c2e48; selection-background-color: #152030; selection-color: #ececec; alternate-background-color: #0e1420; }
 QHeaderView::section { background-color: #111a28; color: #c0c8d8; padding: 4px; border: none; border-right: 1px solid #1c2e48; border-bottom: 1px solid #1c2e48; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #1c2e48; color: #c0c8d8; border: 1px solid #2a3a54; border-radius: 2px; padding: 6px 12px; }
@@ -726,7 +726,7 @@ QToolBar { background-color: #071407; border-bottom: 1px solid #005500; spacing:
 QToolBar QToolButton { color: #009900; border-radius: 2px; }
 QToolBar QToolButton:hover { background-color: #0a2010; color: #00ff00; }
 QStatusBar { background-color: #071407; color: #005500; border-top: 1px solid #005500; }
-QTableView { background-color: #030e03; color: #00cc00; gridline-color: #0a1e0a; selection-background-color: #0a2010; selection-color: #00ff00; alternate-background-color: #050f05; }
+QTableView { background-color: #030e03; color: #00cc00; gridline-color: #0a1e0a; selection-background-color: #0a2010; selection-color: #00cc00; alternate-background-color: #050f05; }
 QHeaderView::section { background-color: #071407; color: #009900; padding: 4px; border: none; border-right: 1px solid #005500; border-bottom: 1px solid #005500; }
 QTableView::item { padding: 4px; }
 QPushButton { background-color: #0a1e0a; color: #009900; border: 1px solid #005500; border-radius: 2px; padding: 6px 12px; }
@@ -783,7 +783,7 @@ QToolBar QToolButton { color: #ffffff; border: 1px solid #ffffff; border-radius:
 QToolBar QToolButton:hover { background-color: #1aebff; color: #000000; border-color: #1aebff; }
 QToolBar QToolButton:focus { border: 3px solid #ffff00; }
 QStatusBar { background-color: #000000; color: #ffffff; border-top: 2px solid #ffffff; }
-QTableView { background-color: #000000; color: #ffffff; gridline-color: #ffffff; selection-background-color: #1aebff; selection-color: #000000; alternate-background-color: #0d0d0d; border: 2px solid #ffffff; }
+QTableView { background-color: #000000; color: #ffffff; gridline-color: #ffffff; selection-background-color: #1aebff; selection-color: #ffffff; alternate-background-color: #0d0d0d; border: 2px solid #ffffff; }
 QTableView:focus { border: 3px solid #ffff00; }
 QTableView::item { padding: 4px; }
 QTableView::item:focus { border: 2px solid #ffff00; }
