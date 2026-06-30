@@ -149,6 +149,7 @@ class SettingsDialog(QDialog):
         self._keyboard_manager = keyboard_manager
         self._shortcut_editors: dict = {}  # action_id → QKeySequenceEdit
         self._original_theme: str = settings.theme  # restore on cancel
+        self._hint_labels: list = []  # QLabels using themed hint color; refreshed on theme change
         self._dirty: bool = False
         # Ollama model auto-detection state
         self._model_fetcher: Optional[_OllamaModelsFetcher] = None
@@ -455,7 +456,7 @@ class SettingsDialog(QDialog):
         # Info
         stats_label = QLabel(self.tr("ℹ️ Format tags, game IDs, XML/alias tokens, and user-added custom terms are always protected regardless of the setting above."))
         stats_label.setWordWrap(True)
-        stats_label.setStyleSheet("color: palette(mid); font-style: italic;")
+        self._register_hint_label(stats_label, "font-style: italic;")
         protection_layout.addWidget(stats_label)
 
         protection_group.setLayout(protection_layout)
@@ -479,7 +480,7 @@ class SettingsDialog(QDialog):
             # Theme description
             self.lbl_theme_desc = QLabel(self._theme_manager.get_theme_description(self._settings.theme))
             self.lbl_theme_desc.setWordWrap(True)
-            self.lbl_theme_desc.setStyleSheet("color: palette(mid); font-style: italic; font-size: 11px;")
+            self._register_hint_label(self.lbl_theme_desc, "font-style: italic; font-size: 11px;")
             theme_layout.addRow(self.lbl_theme_desc)
 
             self.combo_theme.currentTextChanged.connect(self._on_theme_changed)
@@ -505,7 +506,7 @@ class SettingsDialog(QDialog):
             self._orig_ui_lang = self._settings.ui_language
             self.combo_ui_lang.currentIndexChanged.connect(self._on_lang_changed)
             lang_note = QLabel(self.tr("✓ = complete translation  ·  others are community work-in-progress"))
-            lang_note.setStyleSheet("color: palette(mid); font-style: italic; font-size: 11px;")
+            self._register_hint_label(lang_note, "font-style: italic; font-size: 11px;")
             theme_layout.addRow(self.tr("Interface Language:"), self.combo_ui_lang)
             theme_layout.addRow(lang_note)
 
@@ -601,7 +602,7 @@ class SettingsDialog(QDialog):
             )
         )
         bg_note.setWordWrap(True)
-        bg_note.setStyleSheet("color: palette(mid); font-style: italic; font-size: 11px;")
+        self._register_hint_label(bg_note, "font-style: italic; font-size: 11px;")
         bg_layout.addRow(bg_note)
 
         bg_group.setLayout(bg_layout)
@@ -771,7 +772,7 @@ class SettingsDialog(QDialog):
 
         active_dir = get_config_dir()
         self._lbl_active_config_dir = QLabel(str(active_dir))
-        self._lbl_active_config_dir.setStyleSheet("color: palette(mid); font-size: 11px;")
+        self._register_hint_label(self._lbl_active_config_dir, "font-size: 11px;")
         self._lbl_active_config_dir.setWordWrap(True)
         storage_layout.addRow(self.tr("Active config dir:"), self._lbl_active_config_dir)
 
@@ -811,7 +812,7 @@ class SettingsDialog(QDialog):
         # Cache directory row
         active_cache = get_cache_dir()
         self._lbl_active_cache_dir = QLabel(str(active_cache))
-        self._lbl_active_cache_dir.setStyleSheet("color: palette(mid); font-size: 11px;")
+        self._register_hint_label(self._lbl_active_cache_dir, "font-size: 11px;")
         self._lbl_active_cache_dir.setWordWrap(True)
         storage_layout.addRow(self.tr("Active cache dir:"), self._lbl_active_cache_dir)
 
@@ -916,7 +917,7 @@ class SettingsDialog(QDialog):
         except Exception:
             _backend = self.tr("unavailable")
         lbl_keyring = QLabel(self.tr("Key storage: {backend}").format(backend=_backend))
-        lbl_keyring.setStyleSheet("color: palette(mid); font-size: 11px;")
+        self._register_hint_label(lbl_keyring, "font-size: 11px;")
         sec_layout.addRow(lbl_keyring)
 
         sec_group.setLayout(sec_layout)
@@ -1201,7 +1202,7 @@ class SettingsDialog(QDialog):
         # Model-specific advice — updated live when the model combo changes
         self._lbl_model_hint = QLabel()
         self._lbl_model_hint.setWordWrap(True)
-        self._lbl_model_hint.setStyleSheet("color: palette(mid); font-style: italic;")
+        self._register_hint_label(self._lbl_model_hint, "font-style: italic;")
         self._update_model_hint(self.ollama_model.currentText())
         layout.addWidget(self._lbl_model_hint)
 
@@ -1211,12 +1212,12 @@ class SettingsDialog(QDialog):
         tip_row = QHBoxLayout()
         self._lbl_tip = QLabel()
         self._lbl_tip.setWordWrap(True)
-        self._lbl_tip.setStyleSheet("color: palette(mid); font-style: italic;")
+        self._register_hint_label(self._lbl_tip, "font-style: italic;")
         self._show_tip()
         tip_row.addWidget(self._lbl_tip, stretch=1)
         btn_next_tip = QPushButton(self.tr("Next tip →"))
         btn_next_tip.setFlat(True)
-        btn_next_tip.setStyleSheet("color: palette(mid); font-style: italic;")
+        self._register_hint_label(btn_next_tip, "font-style: italic;")
         btn_next_tip.clicked.connect(self._next_tip)
         tip_row.addWidget(btn_next_tip)
         layout.addLayout(tip_row)
@@ -1633,6 +1634,30 @@ class SettingsDialog(QDialog):
         elif hasattr(self, "_lang_restart_lbl"):
             self._lang_restart_lbl.setVisible(False)
 
+    def _register_hint_label(self, label, extra_style: str = "") -> None:
+        """Track a hint/secondary-text QLabel so its color follows theme changes.
+
+        extra_style: additional CSS properties (e.g. "font-style: italic; font-size: 11px;")
+        appended after the color rule.
+        """
+        label.setProperty("_hint_extra_style", extra_style)
+        self._hint_labels.append(label)
+        self._apply_hint_color(label)
+
+    def _apply_hint_color(self, label) -> None:
+        extra = label.property("_hint_extra_style") or ""
+        theme_name = self.combo_theme.currentText() if hasattr(self, "combo_theme") else self._settings.theme
+        color = self._theme_manager.get_hint_color(theme_name) if self._theme_manager else "#888888"
+        label.setStyleSheet(f"color: {color}; {extra}")
+
+    def _refresh_hint_colors(self, theme_name: str) -> None:
+        """Re-apply themed hint color to every registered label (called on theme change)."""
+        for label in self._hint_labels:
+            try:
+                self._apply_hint_color(label)
+            except RuntimeError:
+                pass  # label was deleted
+
     def _on_theme_changed(self, theme_name: str):
         """Update theme description and apply a live preview to this dialog."""
         if not self._theme_manager:
@@ -1644,6 +1669,7 @@ class SettingsDialog(QDialog):
         concrete = self._theme_manager.effective_theme(theme_name)
         preview_qss = self._theme_manager.get_stylesheet(concrete) or ""
         self.setStyleSheet(preview_qss)
+        self._refresh_hint_colors(theme_name)
 
     def _setup_dirty_tracking(self) -> None:
         """Connect all form widgets to _mark_dirty so any edit sets the flag."""

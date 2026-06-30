@@ -916,6 +916,25 @@ class ThemeManager:
         """Get stylesheet by name. Returns None if not found."""
         return self._themes.get(name)
 
+    def get_hint_color(self, name: str) -> str:
+        """Return a hex color for secondary/hint text that is readable on this theme.
+
+        BSEK fix: hint labels previously used ``color: palette(mid)``, which on
+        several dark themes (e.g. Slate) renders nearly invisible because the Qt
+        system palette's "mid" tone is too close to the theme's own background.
+        Instead, reuse each theme's own QStatusBar text color — every built-in
+        theme already defines one, and it is, by construction, legible against
+        that theme's background. Falls back to a neutral mid-gray if a theme
+        (e.g. a user-authored custom theme) has no QStatusBar rule.
+        """
+        import re
+        resolved = self.effective_theme(name)
+        qss = self._themes.get(resolved, "")
+        match = re.search(r"QStatusBar\s*\{[^}]*\bcolor:\s*(#[0-9a-fA-F]{3,8})", qss)
+        if match:
+            return match.group(1)
+        return "#888888"  # neutral fallback for themes without a QStatusBar rule
+
     def set_theme(self, name: str) -> bool:
         """Set current theme by name. Returns True if found (or Auto)."""
         if name == self.AUTO_THEME or name in self._themes:
