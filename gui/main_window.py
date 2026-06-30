@@ -833,6 +833,7 @@ class MainWindow(QMainWindow):
             self.ollama_worker.profile_assignments = self._profile_assignments
             self.ollama_worker.skipped_types = list(self.settings.skip_string_types)
             logger.info("Translation worker initialized (OpenAI-compat: %s @ %s)", oc_model, oc_url)
+            self._active_backend_type = "openai_compat"
         elif is_claude_model(model):
             from gui.claude_client import get_api_key
             from gui.claude_translation_worker import ClaudeTranslationWorker
@@ -853,6 +854,7 @@ class MainWindow(QMainWindow):
             self.ollama_worker.profile_assignments = self._profile_assignments
             self.ollama_worker.skipped_types = list(self.settings.skip_string_types)
             logger.info("Translation worker initialized (Claude: %s)", model)
+            self._active_backend_type = "claude"
         else:
             self.ollama_worker = OllamaWorker(
                 base_url=self.settings.ollama_url,
@@ -5270,7 +5272,15 @@ class MainWindow(QMainWindow):
 
             # Update existing worker config
             enable_protection = self.settings.enable_term_protection
-            if self.ollama_worker:
+            _backend_now = getattr(self.settings, "backend_type", "ollama")
+            _prev_backend = getattr(self, "_active_backend_type", "ollama")
+            if _backend_now != _prev_backend or _backend_now != "ollama":
+                # Backend type changed (or is non-Ollama) — rebuild the worker from
+                # scratch so OpenAI-compat fields are not clobbered by Ollama fields
+                # (update_config() below is Ollama-shaped and would overwrite
+                # base_url/model with Ollama values otherwise).
+                self._init_translation_worker()
+            elif self.ollama_worker and _backend_now == "ollama":
                 self.ollama_worker.update_config(
                     base_url=self.settings.ollama_url,
                     model=self.settings.ollama_model,
@@ -5288,6 +5298,7 @@ class MainWindow(QMainWindow):
                     long_string_action=self.settings.long_string_action,
                 )
                 self.ollama_worker.tm_fuzzy_max_score = self.settings.tm_fuzzy_max_score
+            self._active_backend_type = _backend_now
             # Propagate color-blind mode to the table model immediately
             self.table_model.set_color_blind_mode(self.settings.color_blind_mode)
 
