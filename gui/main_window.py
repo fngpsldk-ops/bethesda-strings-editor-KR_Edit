@@ -2944,6 +2944,7 @@ class MainWindow(QMainWindow):
 
     def _start_translation(self, indices):
         """Start translation batch."""
+        logger.info("[DIAG] _start_translation entered with %d indices", len(indices))
         self._translation_stopping = False
         source_lang = self.combo_source_lang.currentData()
         target_lang = self.combo_target_lang.currentData()
@@ -3029,7 +3030,11 @@ class MainWindow(QMainWindow):
             target_lang=target_lang,
         )
         # CRITICAL FIX: Emit signal instead of direct method call
+        logger.info("[DIAG] emitting translation_requested with %d requests; worker=%s connected=%s",
+                    len(requests), type(self.ollama_worker).__name__ if self.ollama_worker else None,
+                    getattr(self, "_worker_signals_connected", "??"))
         self.translation_requested.emit(requests)
+        logger.info("[DIAG] emit done")
 
     def _claude_preflight_check(self, requests: list) -> bool:
         """
@@ -5285,7 +5290,12 @@ class MainWindow(QMainWindow):
                 # scratch so OpenAI-compat fields are not clobbered by Ollama fields
                 # (update_config() below is Ollama-shaped and would overwrite
                 # base_url/model with Ollama values otherwise).
+                # CRITICAL: must disconnect + reconnect signals around re-init,
+                # otherwise the freshly created worker has translation_requested
+                # never wired and translate_batch() is never invoked.
+                self._disconnect_worker_signals()
                 self._init_translation_worker()
+                self._connect_worker_signals()
             elif self.ollama_worker and _backend_now == "ollama":
                 self.ollama_worker.update_config(
                     base_url=self.settings.ollama_url,

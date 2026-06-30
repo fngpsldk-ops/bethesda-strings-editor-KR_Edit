@@ -167,6 +167,7 @@ class OpenAICompatWorker(QObject):
     # ── main slot ──────────────────────────────────────────────────────────────
     @Slot(list)
     def translate_batch(self, requests: list) -> None:
+        logger.info("[DIAG] OpenAICompatWorker.translate_batch entered with %d requests", len(requests) if requests else 0)
         if not requests:
             self.finished.emit(0, 0)
             return
