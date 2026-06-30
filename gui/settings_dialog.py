@@ -1,6 +1,7 @@
 """
 Settings/Preferences dialog with term protection settings
 """
+import logging
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -53,10 +54,17 @@ class _OllamaModelsFetcher(QThread):
             self.failed.emit(str(exc))
 
 
+logger = logging.getLogger(__name__)
+
+
 class SettingsDialog(QDialog):
     """Dialog for configuring Ollama and term protection settings."""
+    # BSEK: (display name, locale code) tuples — must match
+    # MainWindow.SUPPORTED_LANGUAGES exactly so findData() below resolves.
     SUPPORTED_LANGUAGES = [
-        'English', 'Russian', 'Ukrainian', 'Korean',
+        ('English',  'en'),
+        ('Japanese', 'ja'),
+        ('Korean',   'ko'),
     ]
 
     # Default Ollama model suggestions shown before the user refreshes from the server
@@ -604,14 +612,14 @@ class SettingsDialog(QDialog):
         trans_layout = QFormLayout()
 
         self.combo_source = QComboBox()
-        for lang in self.SUPPORTED_LANGUAGES:
-            self.combo_source.addItem(self.tr(lang), lang)
+        for name, code in self.SUPPORTED_LANGUAGES:
+            self.combo_source.addItem(self.tr(name), code)
         self.combo_source.setCurrentIndex(self.combo_source.findData(self._settings.default_source_lang))
         trans_layout.addRow(self.tr("Default Source:"), self.combo_source)
 
         self.combo_target = QComboBox()
-        for lang in self.SUPPORTED_LANGUAGES:
-            self.combo_target.addItem(self.tr(lang), lang)
+        for name, code in self.SUPPORTED_LANGUAGES:
+            self.combo_target.addItem(self.tr(name), code)
         self.combo_target.setCurrentIndex(self.combo_target.findData(self._settings.default_target_lang))
         trans_layout.addRow(self.tr("Default Target:"), self.combo_target)
 
@@ -1664,8 +1672,20 @@ class SettingsDialog(QDialog):
         self.ollama_group.setVisible(is_local)
         self.cloud_group.setVisible(not is_local)
 
-    def accept(self):
-        self._dirty = False
+    def _stop_background_work(self) -> None:
+        """Stop the auto-refresh timer and any in-flight model fetch.
+
+        Called from both accept() and reject() so closing the dialog via
+        OK, Cancel, the X button, or Esc all clean up identically. Without
+        this, the 8s auto-refresh QTimer (and a possibly-running fetcher
+        thread) could keep referencing a dialog that Qt is in the middle of
+        destroying — a plausible source of the dialog-close instability.
+        """
+        try:
+            if hasattr(self, "_auto_refresh_timer") and self._auto_refresh_timer is not None:
+                self._auto_refresh_timer.stop()
+        except RuntimeError:
+            pass
         if self._model_fetcher is not None:
             try:
                 if self._model_fetcher.isRunning():
@@ -1674,6 +1694,10 @@ class SettingsDialog(QDialog):
             except RuntimeError:
                 pass  # C++ object already deleted
         self._model_fetcher = None
+
+    def accept(self):
+        self._dirty = False
+        self._stop_background_work()
         super().accept()
 
     def reject(self):
@@ -1688,11 +1712,17 @@ class SettingsDialog(QDialog):
             )
             if reply != QMessageBox.Discard:
                 return
+        self._stop_background_work()
         if self._theme_manager:
             orig_concrete = self._theme_manager.effective_theme(self._original_theme)
             orig_qss = self._theme_manager.get_stylesheet(orig_concrete) or ""
             self.setStyleSheet(orig_qss)
+        logger.info(
+            "[DIAG] SettingsDialog.reject(): top-level widgets visible=%s",
+            [type(w).__name__ for w in QApplication.topLevelWidgets() if w.isVisible()],
+        )
         super().reject()
+        logger.info("[DIAG] SettingsDialog.reject(): super().reject() returned")
 
     @Slot()
     def _clear_cache(self):

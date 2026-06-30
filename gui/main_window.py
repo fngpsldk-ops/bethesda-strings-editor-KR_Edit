@@ -496,22 +496,16 @@ class MainWindow(QMainWindow):
     translation_complete = Signal(int, int)
     translation_requested = Signal(list)  # NEW: For thread-safe translation
 
-    # Languages that ship with Starfield (Localization.ba2) + Russian/Ukrainian
-    # for xTranslator-style workflows.  Order: English source first, then
-    # alphabetical by display name.  Locale codes match Starfield's file suffixes.
+    # BSEK: trimmed to English/Japanese/Korean only.
+    # English -> Korean is the only translation pair this fork is built for.
+    # Japanese is kept as a reference: Bethesda's official Japanese localization
+    # distinguishes 반말/존댓말-equivalent registers and is linguistically closer
+    # to Korean than the English source, so it may be useful as a secondary
+    # reference when tuning tone/register for Korean output.
     SUPPORTED_LANGUAGES = [
-        ("English",              "en"),
-        ("German",               "de"),
-        ("Spanish",              "es"),
-        ("French",               "fr"),
-        ("Italian",              "it"),
-        ("Japanese",             "ja"),
-        ("Polish",               "pl"),
-        ("Portuguese (Brazil)",  "ptbr"),
-        ("Chinese (Simplified)", "zhhans"),
-        ("Russian",              "ru"),
-        ("Ukrainian",            "uk"),
-        ("Korean",               "ko"),
+        ("English",  "en"),
+        ("Japanese", "ja"),
+        ("Korean",   "ko"),
     ]
 
     def __init__(self, settings: Optional[AppSettings] = None, parent=None, theme_manager=None):

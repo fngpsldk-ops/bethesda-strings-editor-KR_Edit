@@ -88,8 +88,8 @@ class AppSettings:
     ollama_restart_elevate: bool = False
 
     # ── Translation defaults ─────────────────────────────────────
-    default_source_lang: str = "ru"   # Starfield locale code (en/de/es/fr/it/ja/pl/ptbr/zhhans/ru/uk)
-    default_target_lang: str = "uk"
+    default_source_lang: str = "en"   # BSEK: English source only
+    default_target_lang: str = "ko"   # BSEK: Korean target (primary use case)
     quality_level: int = 7
     long_string_threshold: int = 1000
     long_string_action: str = "Translate"  # Options: Translate, Original, Skip
@@ -761,8 +761,8 @@ def load_settings_qsettings() -> AppSettings:
         ollama_num_ctx=_i("ollama/num_ctx", 16384),
         ollama_restart_command=_s("ollama/restart_command", ""),
         ollama_restart_elevate=_b("ollama/restart_elevate", False),
-        default_source_lang=_s("translation/source_lang", "ru"),
-        default_target_lang=_s("translation/target_lang", "uk"),
+        default_source_lang=_s("translation/source_lang", "en"),
+        default_target_lang=_s("translation/target_lang", "ko"),
         quality_level=_i("translation/quality", 7),
         long_string_threshold=_i("translation/long_string_threshold", 1000),
         long_string_action=_s("translation/long_string_action", "Translate"),
