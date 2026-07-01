@@ -70,6 +70,16 @@ class AppSettings:
     openai_compat_model: str = "gemini-2.5-flash"
     # API key stored in SecretStore (not here) — see gui/openai_compat_client.py
 
+    # ── Prompt Editor (GUI-editable persona / custom rules) ────────
+    # Empty string means "use the built-in BSEK default" (see
+    # gui/ollama_worker.py: DEFAULT_PERSONA / DEFAULT_CUSTOM_RULES).
+    # Applied to BOTH backends (Ollama and OpenAI-compatible) since both
+    # build prompts through TranslationRequest.to_system_prompt().
+    prompt_persona: str = ""
+    prompt_custom_rules: str = ""
+    # Named presets: {"이름": {"persona": "...", "custom_rules": "..."}}
+    prompt_presets: dict = field(default_factory=dict)
+
     # ── Ollama ───────────────────────────────────────────────────
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "translategemma3-st"

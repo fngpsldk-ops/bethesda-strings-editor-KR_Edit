@@ -201,6 +201,75 @@ def _restore_line_structure(translated: str, original_text: str) -> str:
     return result
 
 
+# ── BSEK: GUI-editable prompt overrides ───────────────────────────────────────
+#
+# Settings > Prompt Editor lets the user rewrite two parts of the system
+# prompt without touching source code:
+#   - "persona"       : replaces the opening identity/role sentence
+#   - "custom_rules"  : appended after the fixed numbered rules (1-9), which
+#                       cover things that must never be broken (game tag
+#                       preservation, bracket-token handling, glossary
+#                       enforcement) and are therefore NOT user-editable.
+#
+# Both fall back to these BSEK defaults when empty, so a user who never opens
+# the prompt editor gets identical behaviour to before this feature existed.
+DEFAULT_PERSONA = (
+    "You are a professional Bethesda Starfield game localization translator."
+)
+
+DEFAULT_CUSTOM_RULES = (
+    "10. Quest objectives, mission logs, and player-directed action prompts "
+    "(text telling the player what to do — e.g. 'Attempt to steal fuel', "
+    "'Speak to the captain', 'Investigate the signal') should be phrased as a "
+    "polite imperative command ending in ~하십시오 or ~하세요, matching how "
+    "Starfield's quest log addresses the player. Do NOT translate these as a "
+    "flat description of an action (e.g. avoid '...하려 시도합니다'); phrase them "
+    "as an instruction to the player. "
+    "Example: 'Attempt to undetectably steal any available fuel from a docked "
+    "vessel.' → '도킹 중인 함선에서 감지되지 않고 사용 가능한 연료를 훔치십시오.'\n"
+    "11. Match speech register (반말 vs 존댓말) to the speaker's apparent social "
+    "role, inferred from tone and context — not a fixed rule per character. "
+    "Rough, hostile, or criminal-sounding dialogue (pirates, threats, insults, "
+    "smugglers) generally reads more naturally in 반말. Professional, commercial, "
+    "or civic dialogue (shopkeepers, officials, ship computers, customer-facing "
+    "announcements) generally reads more naturally in 존댓말. UI labels, system "
+    "messages, and menu text should default to a neutral/formal register. When "
+    "genuinely unsure, prefer 존댓말 — it is the safer default for a general "
+    "audience."
+)
+
+# Process-wide active override, set by MainWindow whenever settings are loaded
+# or the Prompt Editor is applied. Deliberately module-level (not per-request)
+# so none of the 5 TranslationRequest(...) construction call sites in
+# main_window.py need to be touched — to_system_prompt() just reads whatever
+# is currently active at call time.
+_active_persona: str = ""
+_active_custom_rules: str = ""
+
+
+def set_prompt_overrides(persona: str = "", custom_rules: str = "") -> None:
+    """Apply GUI-edited persona/custom-rules text (empty string = use default).
+
+    Called by MainWindow on startup (after settings load) and whenever the
+    Prompt Editor dialog is applied. Affects both the local (Ollama) and
+    cloud (OpenAI-compatible) backends, since both build prompts through
+    TranslationRequest.to_system_prompt().
+    """
+    global _active_persona, _active_custom_rules
+    _active_persona = (persona or "").strip()
+    _active_custom_rules = (custom_rules or "").strip()
+
+
+def get_prompt_overrides() -> tuple[str, str]:
+    """Return the currently active (persona, custom_rules) override strings.
+
+    Empty string means "using the BSEK default" for that field — callers that
+    want the actual effective text (e.g. a prompt-preview UI) should fall back
+    to DEFAULT_PERSONA / DEFAULT_CUSTOM_RULES themselves when empty.
+    """
+    return _active_persona, _active_custom_rules
+
+
 # ── Per-language prompt data ──────────────────────────────────────────────────
 
 # Full display name used in the "To {Language}:" user-turn prefix that
@@ -516,8 +585,9 @@ class TranslationRequest:
             f"casual stays casual.",
         )
 
+        persona_text = _active_persona or DEFAULT_PERSONA
         base = (
-            f"You are a professional Bethesda Starfield game localization translator.\n"
+            f"{persona_text}\n"
             f"Translate the {src_name} text to natural, polished {tgt_name}. "
             f"Output ONLY the translated text — no preamble, no notes, no commentary.\n\n"
             f"Rules:\n"
@@ -584,25 +654,14 @@ class TranslationRequest:
             "'(A better translation would be...)'. If you are unsure, output your single best "
             "Korean translation with nothing after it.\n"
             "9. Never output the same translation twice. Produce exactly one translation per input.\n"
-            "10. Quest objectives, mission logs, and player-directed action prompts "
-            "(text telling the player what to do — e.g. 'Attempt to steal fuel', "
-            "'Speak to the captain', 'Investigate the signal') should be phrased as a "
-            "polite imperative command ending in ~하십시오 or ~하세요, matching how "
-            "Starfield's quest log addresses the player. Do NOT translate these as a "
-            "flat description of an action (e.g. avoid '...하려 시도합니다'); phrase them "
-            "as an instruction to the player. "
-            "Example: 'Attempt to undetectably steal any available fuel from a docked "
-            "vessel.' → '도킹 중인 함선에서 감지되지 않고 사용 가능한 연료를 훔치십시오.'\n"
-            "11. Match speech register (반말 vs 존댓말) to the speaker's apparent social "
-            "role, inferred from tone and context — not a fixed rule per character. "
-            "Rough, hostile, or criminal-sounding dialogue (pirates, threats, insults, "
-            "smugglers) generally reads more naturally in 반말. Professional, commercial, "
-            "or civic dialogue (shopkeepers, officials, ship computers, customer-facing "
-            "announcements) generally reads more naturally in 존댓말. UI labels, system "
-            "messages, and menu text should default to a neutral/formal register. When "
-            "genuinely unsure, prefer 존댓말 — it is the safer default for a general "
-            "audience.\n"
         )
+
+        # BSEK: user-editable rules (Settings > Prompt Editor). Falls back to
+        # DEFAULT_CUSTOM_RULES (quest-imperative phrasing + register guidance)
+        # when the user has not customized this field.
+        custom_rules_text = _active_custom_rules or DEFAULT_CUSTOM_RULES
+        if custom_rules_text:
+            base += custom_rules_text.rstrip("\n") + "\n"
 
         # Source-language note (e.g. Russian needs a "don't transliterate" reminder).
         src_extra = _SOURCE_EXTRA.get(self.source_lang, "")
@@ -912,8 +971,8 @@ class OllamaWorker(QObject):
         - prompt rule changes -> bump PROMPT_VERSION below
         """
         import hashlib as _hl
-        PROMPT_VERSION = 2  # bumped: added Rule 10 (quest imperative) + Rule 11 (register)
-        parts = [f"pv{PROMPT_VERSION}"]
+        PROMPT_VERSION = 3  # bumped: persona/custom_rules are now GUI-editable overrides
+        parts = [f"pv{PROMPT_VERSION}", f"persona={_active_persona}", f"rules={_active_custom_rules}"]
         if self.glossary_manager is not None:
             try:
                 entries = self.glossary_manager.get_all_entries()

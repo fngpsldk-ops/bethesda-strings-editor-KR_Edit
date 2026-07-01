@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Bump this when the prompt-construction logic changes in a way that should
 # invalidate cached translations produced by this worker.
-PROMPT_VERSION = 2  # bumped: added Rule 10 (quest imperative) + Rule 11 (register)
+PROMPT_VERSION = 3  # bumped: persona/custom_rules are now GUI-editable overrides
 
 
 class OpenAICompatWorker(QObject):
@@ -145,7 +145,9 @@ class OpenAICompatWorker(QObject):
         Changing the glossary or bumping PROMPT_VERSION changes this hash, so
         old cache entries are bypassed and re-translated automatically.
         """
-        parts = [f"pv{PROMPT_VERSION}"]
+        from gui.ollama_worker import get_prompt_overrides
+        _persona, _rules = get_prompt_overrides()
+        parts = [f"pv{PROMPT_VERSION}", f"persona={_persona}", f"rules={_rules}"]
         if self.glossary_manager is not None:
             try:
                 entries = self.glossary_manager.get_all_entries()

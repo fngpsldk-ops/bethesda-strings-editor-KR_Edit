@@ -537,6 +537,14 @@ class MainWindow(QMainWindow):
         )
         self.theme_manager = theme_manager
 
+        # BSEK: apply any GUI-edited persona/custom-rules from settings so the
+        # translation prompt reflects the user's saved edits from app start.
+        # Must run before _init_translation_worker() builds the first worker.
+        from gui.ollama_worker import set_prompt_overrides
+        set_prompt_overrides(
+            self.settings.prompt_persona, self.settings.prompt_custom_rules
+        )
+
         # Initialize term protector with auto-loaded game terms
         base_dir = Path(__file__).parent.parent
         game_terms_file = base_dir / "game_terms_only.txt"
