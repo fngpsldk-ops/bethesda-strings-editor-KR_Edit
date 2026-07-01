@@ -1612,18 +1612,9 @@ class MainWindow(QMainWindow):
         self.register_check_action.setEnabled(False)
         trans_menu.addAction(self.register_check_action)
 
-        self.gender_check_action = QAction(
-            self.tr("Check &Gender Agreement…"), self
-        )
-        self.gender_check_action.setIcon(QIcon.fromTheme("format-text-italic"))
-        self.gender_check_action.setShortcut("Ctrl+Alt+G")
-        self.gender_check_action.setToolTip(self.tr(
-            "Scan translated strings for adjective/noun gender agreement\n"
-            "errors (Ukrainian grammar). (Ctrl+Alt+G)"
-        ))
-        self.gender_check_action.triggered.connect(self._check_gender_agreement)
-        self.gender_check_action.setEnabled(False)
-        trans_menu.addAction(self.gender_check_action)
+        # BSEK: Ukrainian-specific gender-agreement check removed — Korean has
+        # no adjective/noun grammatical gender, so this feature never applies
+        # to this fork's only translation pair (en -> ko). See CHANGES.md.
 
         # ── Sessions menu ─────────────────────────────────────────────────────
         self._sessions_menu = menubar.addMenu(self.tr("&Sessions"))
@@ -2022,8 +2013,6 @@ class MainWindow(QMainWindow):
             self.check_consistency_action.setEnabled(has_file)
         if hasattr(self, "register_check_action"):
             self.register_check_action.setEnabled(has_file)
-        if hasattr(self, "gender_check_action"):
-            self.gender_check_action.setEnabled(has_file)
         if hasattr(self, "font_checker_action"):
             self.font_checker_action.setEnabled(has_file)
         if hasattr(self, "btn_encoding_change"):
@@ -5045,7 +5034,7 @@ class MainWindow(QMainWindow):
     def _open_command_palette(self) -> None:
         """Open the Ctrl+K command palette."""
         from gui.command_palette import CommandPaletteDialog
-        dialog = CommandPaletteDialog(self.keyboard_manager, parent=self)
+        dialog = CommandPaletteDialog(self.keyboard_manager, parent=self, theme_manager=self.theme_manager)
         dialog.exec()
 
     # ── Macro editor ──────────────────────────────────────────────────────────
@@ -6458,29 +6447,6 @@ class MainWindow(QMainWindow):
 
         groups = check_register(rows)
         dlg = RegisterDialog(groups, parent=self)
-        dlg.jump_to_row.connect(self._jump_to_row)
-        dlg.exec()
-
-    def _check_gender_agreement(self) -> None:
-        """Scan translated strings for Ukrainian adjective/noun gender mismatches."""
-        from gui.gender_checker import check_gender_agreement
-        from gui.gender_dialog import GenderDialog
-
-        rows = list(self.table_model._data)
-        translated_count = sum(
-            1 for r in rows
-            if r.get("status") in ("translated", "approved") and r.get("translated")
-        )
-        if translated_count == 0:
-            QMessageBox.information(
-                self,
-                self.tr("Gender Agreement Check"),
-                self.tr("No translated strings found. Translate some strings first."),
-            )
-            return
-
-        mismatches = check_gender_agreement(rows)
-        dlg = GenderDialog(mismatches, parent=self)
         dlg.jump_to_row.connect(self._jump_to_row)
         dlg.exec()
 

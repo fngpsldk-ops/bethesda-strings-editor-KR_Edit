@@ -31,14 +31,31 @@ class CommandPaletteDialog(QDialog):
     Arrow keys / Enter to navigate and execute. Escape to dismiss.
     """
 
-    def __init__(self, keyboard_manager: KeyboardManager, parent=None) -> None:
+    def __init__(self, keyboard_manager: KeyboardManager, parent=None, theme_manager=None) -> None:
         super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint)
         self._km = keyboard_manager
+        self._theme_manager = theme_manager
         self._setup_ui()
         self._populate("")
         self._center_under_title_bar()
 
     # ── UI construction ───────────────────────────────────────────────────────
+
+    def _hint_color(self) -> str:
+        """Themed secondary-text color; falls back to a neutral gray if no
+        theme_manager was provided (e.g. dialog created without one).
+        Mirrors SettingsDialog's use of ThemeManager.get_hint_color() so hint
+        text is always legible against the active theme's background instead
+        of relying on the Qt system palette's "mid" tone, which can render
+        near-invisible on several dark themes.
+        """
+        if self._theme_manager is not None:
+            try:
+                current = self._theme_manager.current_theme
+                return self._theme_manager.get_hint_color(current)
+            except Exception:
+                pass
+        return "#888888"
 
     def _setup_ui(self) -> None:
         self.setFixedWidth(660)
@@ -91,7 +108,7 @@ class CommandPaletteDialog(QDialog):
         hint_layout = QHBoxLayout(hint_wrap)
         hint_layout.setContentsMargins(12, 3, 12, 3)
         lbl = QLabel(self.tr("↵ Execute   ↑↓ Navigate   Esc Dismiss"))
-        lbl.setStyleSheet("font-size: 10px; color: palette(mid);")
+        lbl.setStyleSheet(f"font-size: 10px; color: {self._hint_color()};")
         hint_layout.addWidget(lbl)
         hint_layout.addStretch()
         outer.addWidget(hint_wrap)
@@ -145,7 +162,7 @@ class CommandPaletteDialog(QDialog):
         # Action name
         name = QLabel(e.name)
         if not enabled:
-            name.setStyleSheet("color: palette(mid);")
+            name.setStyleSheet(f"color: {self._hint_color()};")
         layout.addWidget(name, 1)
 
         # Shortcut badge
@@ -153,7 +170,7 @@ class CommandPaletteDialog(QDialog):
         if sc:
             sc_lbl = QLabel(KeyboardManager.shortcut_display(sc))
             sc_lbl.setStyleSheet(
-                "padding: 1px 6px; border: 1px solid palette(mid);"
+                f"padding: 1px 6px; border: 1px solid {self._hint_color()};"
                 " border-radius: 3px; font-size: 10px;"
             )
             layout.addWidget(sc_lbl)
