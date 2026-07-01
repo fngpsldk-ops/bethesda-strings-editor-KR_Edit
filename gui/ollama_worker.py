@@ -218,24 +218,22 @@ DEFAULT_PERSONA = (
 )
 
 DEFAULT_CUSTOM_RULES = (
-    "10. Quest objectives, mission logs, and player-directed action prompts "
-    "(text telling the player what to do — e.g. 'Attempt to steal fuel', "
-    "'Speak to the captain', 'Investigate the signal') should be phrased as a "
-    "polite imperative command ending in ~하십시오 or ~하세요, matching how "
-    "Starfield's quest log addresses the player. Do NOT translate these as a "
-    "flat description of an action (e.g. avoid '...하려 시도합니다'); phrase them "
-    "as an instruction to the player. "
-    "Example: 'Attempt to undetectably steal any available fuel from a docked "
+    "10. 퀘스트 목표, 미션 로그, 플레이어에게 행동을 지시하는 문구 "
+    "(예: 'Attempt to steal fuel', 'Speak to the captain', "
+    "'Investigate the signal' 처럼 플레이어가 뭘 해야 하는지 알려주는 텍스트)는 "
+    "스타필드의 퀘스트 로그가 플레이어에게 말을 거는 방식과 맞춰 "
+    "~하십시오 또는 ~하세요로 끝나는 존댓말 명령형으로 표현하세요. "
+    "이런 문구를 행동에 대한 평서형 서술(예: '...하려 시도합니다')로 번역하지 말고, "
+    "플레이어에게 내리는 지시로 표현하세요. "
+    "예: 'Attempt to undetectably steal any available fuel from a docked "
     "vessel.' → '도킹 중인 함선에서 감지되지 않고 사용 가능한 연료를 훔치십시오.'\n"
-    "11. Match speech register (반말 vs 존댓말) to the speaker's apparent social "
-    "role, inferred from tone and context — not a fixed rule per character. "
-    "Rough, hostile, or criminal-sounding dialogue (pirates, threats, insults, "
-    "smugglers) generally reads more naturally in 반말. Professional, commercial, "
-    "or civic dialogue (shopkeepers, officials, ship computers, customer-facing "
-    "announcements) generally reads more naturally in 존댓말. UI labels, system "
-    "messages, and menu text should default to a neutral/formal register. When "
-    "genuinely unsure, prefer 존댓말 — it is the safer default for a general "
-    "audience."
+    "11. 반말과 존댓말은 화자의 사회적 위치를 어투와 맥락에서 추론해서 판단하세요 "
+    "— 캐릭터마다 정해진 규칙이 아닙니다. "
+    "거칠거나 적대적이거나 범죄자 같은 대사(해적, 협박, 모욕, 밀수업자)는 "
+    "대체로 반말이 더 자연스럽습니다. 전문적·상업적·공적인 대사(상점 주인, 관리, "
+    "선박 컴퓨터, 고객 응대 안내방송)는 대체로 존댓말이 더 자연스럽습니다. "
+    "UI 라벨, 시스템 메시지, 메뉴 텍스트는 기본적으로 중립적·격식체를 쓰세요. "
+    "정말 확신이 안 서면 존댓말을 쓰세요 — 일반 사용자에게 더 안전한 기본값입니다."
 )
 
 # Process-wide active override, set by MainWindow whenever settings are loaded
@@ -975,7 +973,7 @@ class OllamaWorker(QObject):
         - prompt rule changes -> bump PROMPT_VERSION below
         """
         import hashlib as _hl
-        PROMPT_VERSION = 4  # bumped: base prompt (rules 1-9, persona, bracket examples) translated to Korean
+        PROMPT_VERSION = 5  # bumped: DEFAULT_CUSTOM_RULES (rules 10-11) translated to Korean
         parts = [f"pv{PROMPT_VERSION}", f"persona={_active_persona}", f"rules={_active_custom_rules}"]
         if self.glossary_manager is not None:
             try:

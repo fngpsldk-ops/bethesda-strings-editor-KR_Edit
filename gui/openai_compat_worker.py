@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Bump this when the prompt-construction logic changes in a way that should
 # invalidate cached translations produced by this worker.
-PROMPT_VERSION = 4  # bumped: base prompt (rules 1-9, persona, bracket examples) translated to Korean
+PROMPT_VERSION = 5  # bumped: DEFAULT_CUSTOM_RULES (rules 10-11) translated to Korean
 
 
 class OpenAICompatWorker(QObject):

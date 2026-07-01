@@ -2387,6 +2387,20 @@ added, removed, or modified, and migrate unchanged translations.</source>
         <translation>게임 폴더 일괄 비교(&amp;F)…</translation>
     </message>
     <message>
+        <location filename="../main_window.py" line="1422"/>
+        <source>&amp;Prompt Editor…</source>
+        <translation>프롬프트 편집기(&amp;P)…</translation>
+    </message>
+    <message>
+        <location filename="../main_window.py" line="1424"/>
+        <source>Edit the translation prompt's persona and style rules, and save/load
+named presets. Safety-critical rules (game tag preservation, glossary
+enforcement) are not editable here and always remain in effect.</source>
+        <translation>번역 프롬프트의 정체성(페르소나)과 스타일 규칙을 편집하고,
+이름을 붙여 프리셋으로 저장/불러오기할 수 있습니다. 안전에 관련된 규칙
+(게임 태그 보존, 용어집 강제 적용)은 여기서 편집할 수 없으며 항상 자동으로 적용됩니다.</translation>
+    </message>
+    <message>
         <location filename="../main_window.py" line="1388"/>
         <source>Compare all .strings files across two game-version folders
 and generate a combined migration report.</source>
