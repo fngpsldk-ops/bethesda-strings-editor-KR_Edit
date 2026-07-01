@@ -1,288 +1,241 @@
-# Bethesda Strings Editor
+# BSEK — Bethesda Strings Editor: Korean Edition
 
-AI-assisted localization tool for Bethesda game files (Starfield). Translates `.strings`, `.dlstrings`, `.ilstrings`, BA2 archives, ESP/ESM plugin files, and Starfield interface TXT files between all 12 supported languages using a locally-running Ollama model or the Claude API, with a full quality-checking and review workflow.
+> **이 프로젝트는 [0xra0/bethesda-strings-editor](https://github.com/0xra0/bethesda-strings-editor)의 포크입니다.**
+> 원본은 다국어(9개 공식 언어 + 러시아어/우크라이나어/한국어) 지원 도구이며,
+> 이 포크(BSEK)는 **한국 이용자를 위해 영어 → 한국어 Starfield 모드 번역에 특화하여 개조**한
+> 버전입니다. 원본 도구 및 다른 언어 지원이 필요하시면 위 원본 저장소를 이용해주세요.
 
-![NexusMods Header](resources/nexusmods_header.png)
+AI 기반 Starfield 모드 로컬라이제이션 도구. `.strings`, `.dlstrings`, `.ilstrings`,
+BA2 아카이브, ESP/ESM 플러그인 파일, Starfield 인터페이스 TXT 파일을 영어에서
+한국어로 번역합니다. Gemini/ChatGPT 같은 클라우드 AI 또는 로컬 Ollama 모델을 사용하며,
+번역 프롬프트를 GUI에서 직접 편집·저장할 수 있고, 전체 품질 검수 워크플로우를
+포함합니다.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![PySide6](https://img.shields.io/badge/UI-PySide6%20%2F%20Qt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://doc.qt.io/qtforpython)
-[![Ollama](https://img.shields.io/badge/AI-Ollama-0D0D0D?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.com)
+[![Ollama](https://img.shields.io/badge/AI-Ollama%20(local)-0D0D0D?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.com)
+[![Gemini](https://img.shields.io/badge/AI-Gemini%20%2F%20OpenAI%20compatible-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white)](https://aistudio.google.com/apikey)
 [![Claude](https://img.shields.io/badge/AI-Claude%20API-7C3AED?style=for-the-badge&logo=anthropic&logoColor=white)](https://claude.ai)
 [![License](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
-[![NexusMods](https://img.shields.io/badge/NexusMods-Starfield-D98F40?style=for-the-badge&logo=nexusmods&logoColor=white)](https://www.nexusmods.com/starfield/mods/17158)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/0xra0/bethesda-strings-editor)
 
 ---
 
-## Ollama models
+## BSEK에서 새로 추가/변경된 것 (원본 대비)
 
-| Model | Purpose | Hub |
+원본 프로젝트의 핵심 번역·QA 엔진은 그대로 유지하면서, 다음을 새로 추가하거나 바꿨습니다:
+
+- **클라우드 AI 번역 백엔드 (GUI 내장)** — Gemini, ChatGPT 등 OpenAI 호환 API를
+  `Settings > Translation Backend`에서 직접 선택하고 API 키를 입력할 수 있습니다.
+  외부 프록시 서버를 따로 실행할 필요가 없습니다. 모델은 콤보박스에서 선택하거나
+  직접 입력할 수 있고(`gemini-3.5-flash` 등), API 키는 시스템 키링에 안전하게 저장됩니다.
+- **프롬프트 에디터** (`Translation > Prompt Editor…`) — 번역 프롬프트의 정체성
+  (페르소나)과 스타일 규칙을 GUI에서 직접 편집할 수 있습니다.
+  - 이름을 붙여 프리셋으로 저장/불러오기/이름변경/삭제
+  - 실시간 미리보기(모델에 실제로 전송될 전체 프롬프트 확인)
+  - 규칙 칸을 비워두면 BSEK 기본 규칙(게임 태그 보존, 대괄호 처리, 용어집 강제,
+    퀘스트 명령형 어투, 반말/존댓말 가이드)이 자동 적용됩니다
+  - 규칙 칸에 직접 입력하면 기본 규칙 전체를 대체합니다 — 다른 베데스다 게임
+    (Skyrim, Fallout 등)이나 다른 언어쌍용으로 프롬프트를 처음부터 새로 작성할 때
+    사용하세요. "베이스 규칙 복사" 버튼으로 기존 규칙을 불러와 이어서 편집할 수도
+    있습니다.
+- **한국어 중심 언어 구성** — 지원 언어를 English / Japanese / Korean 세 가지로
+  정리했습니다. 일본어는 번역 대상이 아니라 **참고용**으로 남겨뒀습니다 —
+  베데스다 공식 일본어 로컬라이제이션이 존댓말/반말 구분을 갖고 있어, 한국어와
+  가장 가까운 참고 자료가 될 수 있기 때문입니다. 기본 번역 방향은 English → Korean.
+- **메뉴 한글화** — 인터페이스 전체가 한국어로 번역되어 있습니다
+  (`gui/translations/ko_KR.ts`/`.qm`, 1,589개 UI 문자열).
+- **한국어 번역 품질 튜닝**:
+  - 팀 왈도(Team Wallo) 한글 패치 용어집(2,067개 UI 용어) 연동
+  - 퀘스트 목표/미션 로그는 서술형이 아닌 존댓말 명령형(~하십시오/~하세요)으로
+    번역하도록 규칙 추가
+  - 반말/존댓말은 화자의 맥락(거친 대사=반말 경향, 공적/상업적 대사=존댓말 경향)에
+    따라 판단하도록 가이드
+- **안정성 수정** — GPU 모니터 프리징, Windows Python 3.10 크래시, Settings
+  저장 시 앱이 조용히 종료되는 버그, 다크 테마에서 텍스트가 안 보이던 저대비
+  문제, 셀 선택 시 글자색이 안 보이던 문제 등 다수 수정.
+- **업데이트 확인 대상 변경** — 원본은 업데이트 확인 및 "새 소식" 패널이 원본
+  저장소(`0xra0/bethesda-strings-editor`)를 가리키고 있었습니다. BSEK는 이
+  포크 저장소를 가리키도록 변경하여, 원본 프로젝트의 업데이트가 이 개조판을
+  덮어쓰는 일이 없도록 했습니다.
+- **실행 편의성** — 더블클릭으로 실행하는 Windows용 `run_bsek.bat` 런처 추가.
+- **정리** — 한국어와 무관한 우크라이나어 전용 문법 검사 메뉴(성 일치 검사)를
+  제거했습니다.
+
+원본에 있던 다른 언어(독일어, 스페인어, 프랑스어, 이탈리아어, 폴란드어,
+포르투갈어, 중국어 간체, 러시아어, 우크라이나어) 지원과 관련 기능(우크라이나어
+문법 검사, ти/ви 존비법 검사 등)이 필요하시면 [원본 저장소](https://github.com/0xra0/bethesda-strings-editor)를
+이용해주세요.
+
+---
+
+## 번역 백엔드
+
+### 클라우드 AI (권장)
+
+`Settings > Translation Backend > Cloud AI`에서 설정합니다.
+
+| 항목 | 값 |
+|------|-----|
+| Base URL 예시 (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| Base URL 예시 (ChatGPT) | `https://api.openai.com/v1` |
+| 추천 모델 | `gemini-3.5-flash` |
+| API 키 발급 (Gemini) | https://aistudio.google.com/apikey |
+
+OpenAI 호환 API를 제공하는 서비스라면 어디든 Base URL만 바꿔서 연결할 수 있습니다.
+
+### 로컬 Ollama (대안)
+
+로컬 모델을 계속 사용할 수도 있습니다. `Settings > Translation Backend > Local LLM`에서 설정하세요.
+
+| 모델 | 용도 | 비고 |
 |-------|---------|-----|
-| `translategemma3-st` | Game string translation — Gemma 3 12B fine-tune (6.5 GB) | local GGUF |
-| `translategemma3-st-2` | Same fine-tune, reduced context (8 k) for GPU inference | local GGUF |
-| `mamaylm` | MamayLM Gemma 3 12B IT v2.0 — INSAIT Ukrainian fine-tune | local GGUF |
-| `gemma4-opus48-st` | Gemma 4 12B IT fine-tuned on Claude Opus reasoning data | local GGUF |
-| `qcgemma4-st` | Translation quality checking — Gemma 4 E4B fine-tune (16 issue codes) | [0xra/bethesda-qc](https://ollama.com/0xra/bethesda-qc) |
-
-Pull the QC model from the hub:
+| `exaone3.5:7.8b-instruct-q8_0` | 한국어 특화 (LG AI Research) | 로컬 사용 시 권장 |
+| `translategemma3-st` | 원본 프로젝트의 다국어 번역 모델 | 원본 GGUF 필요 |
+| `qcgemma4-st` | 번역 품질 검사 (16개 이슈 코드) | [0xra/bethesda-qc](https://ollama.com/0xra/bethesda-qc) |
 
 ```bash
-ollama pull 0xra/bethesda-qc
-ollama cp 0xra/bethesda-qc qcgemma4-st
+ollama pull exaone3.5:7.8b-instruct-q8_0
 ```
 
-For translation models, edit `Modelfile` / `Modelfile.qc` / `Modelfile.gemma4-opus48` to set the correct `FROM` path to your local GGUF, then:
-
-```bash
-ollama create translategemma3-st -f Modelfile
-ollama create qcgemma4-st -f Modelfile.qc
-ollama create gemma4-opus48-st -f Modelfile.gemma4-opus48
-```
+로컬 모델은 반말/존댓말 구분처럼 세계관 지식이 필요한 판단에서 클라우드 AI보다
+품질이 낮은 경향이 있습니다. 가능하면 클라우드 AI 사용을 권장합니다.
 
 ---
 
-## Supported languages
+## 지원 언어
 
-All 9 official Starfield languages plus Russian, Ukrainian, and Korean:
-
-| Code | Language |
-|------|----------|
-| `en` | English |
-| `de` | German |
-| `es` | Spanish |
-| `fr` | French |
-| `it` | Italian |
-| `ja` | Japanese |
-| `ko` | Korean |
-| `pl` | Polish |
-| `ptbr` | Portuguese (Brazil) |
-| `zhhans` | Chinese (Simplified) |
-| `ru` | Russian |
-| `uk` | Ukrainian |
-
-Each language pair has a dedicated system prompt with register rules, script conventions, and native examples.
+| Code | Language | 비고 |
+|------|----------|-----|
+| `en` | English | 번역 원문 (기본 소스) |
+| `ko` | Korean | 번역 대상 (기본 타겟) |
+| `ja` | Japanese | 참고용 (반말/존댓말 대조) |
 
 ---
 
-## Features
-
-### Translation
-- **Parallel AI translation** via [Ollama](https://ollama.com) with configurable concurrency (default 10 workers)
-- **Claude API backend** — drop-in alternative to Ollama; select Haiku 4.5, Sonnet 4.6, or Opus 4.8 in Settings
-- **AI-fix mode** — instead of retranslating from source, sends the existing flawed translation + QC issue descriptions to the model for targeted correction; faster and more precise than a full retranslation
-- **Language-pair prompts** — dedicated system prompts for every source→target combination with register rules, script conventions, and native examples
-- **Translation memory** — known strings are looked up before calling the model, so they are never retranslated
-- **Translation cache** — SHA-256-keyed JSON cache (up to 50,000 entries) persisted across sessions
-- **Term protector** — 8,000+ Starfield-specific terms are replaced with placeholder tokens before the AI sees the text and restored afterward, preventing mistranslation of proper nouns
-- **Pipeline post-processing** — per-string passes after every translation: game tag restoration, case matching, line-prefix preservation, newline structure repair, mixed-script repair, guillemet close-quote enforcement
-- **Glossary system** — CSV/TBX/JSON glossary with in-app editor, term suggestions dock, and automatic injection into AI prompts
-- **Character Persona Profiling** — assign a voice profile to any string or quest (Freestar Ranger, SysDef Officer, Crimson Fleet Pirate, House Va'ruun Zealot, UC Civilian, Robot/Automaton, Narrator, or custom); each profile overrides the AI system prompt and temperature
-- **Lore RAG** — local SQLite FTS5 lore database (built-in UESP downloader); relevant faction, location, and character articles are retrieved per string and injected into the AI prompt
-- **Pre-translation estimator** — scores each string 0–100 to predict translation difficulty before the AI runs
-- **Skip string types** — exclude Book, Note, or other categories from AI batch translation
-- **Protect named entities** — opt-in setting to extend term protection to faction/ship/character names inferred from the loaded file
-- **Claude pre-flight cost estimator** — shows token count and estimated cost before starting a batch translation
-
-### File support
-- **Binary string files**: `.strings` (null-terminated), `.dlstrings` / `.ilstrings` (length-prefixed)
-- **BA2 archives**: read and write Starfield v2 BA2 files (GNRL type, zlib-compressed); picker dialog for multi-entry archives
-- **ESP/ESM plugins**: non-localized plugins where text is stored directly in field buffers
-- **ESP/ESM Mod Update Migration** (Translation → Mod Update Migration) — diff an old and new version of a plugin keyed on FormID and carry existing translations forward to the updated release (xTranslator-style); risk-coloured 7-column diff with changed-only filter and CSV/HTML export
-- **VMAD script-property analysis** (Translation → Script Property Analysis) — parses the Papyrus script-property strings attached to records, classifies each value as translatable / review / locked (resource paths, event names, identifiers), and byte-splices only the edited values so unmodelled script structures survive untouched; works on both localized and non-localized plugins
-- **Starfield interface TXT**: `translate_en.txt` / `translate_ru.txt` key=value interface string files
-- **xTranslator SST XML**: import/export in xTranslator format (match by `sID`, fallback to source text)
-- **Drag-and-drop** file loading with format validation
-- **NexusMods Translation Browser** — search NexusMods for existing translation mods, browse their files, and import `.strings`/`.dlstrings`/`.ilstrings` directly as a Translation Memory or merge into the current file; zip, 7z, and rar archives are automatically extracted; free-account downloads via browser cookies (`curl-cffi`)
-- **NexusMods upload** — v3 multipart upload client with presigned S3 URLs (File → Upload to NexusMods)
-
-### Quality assurance
-- **Quality checker** — 20+ checks: missing/extra game tags, empty or untranslated strings, source-language leakage, English leak, suspicious length ratios, newline mismatches, truncated AI output, AI artifact prefixes, encoding failures, unclosed guillemets, unmatched brackets, script coverage (CJK), and more
-- **RU→UK false-positive reduction** — UNTRANSLATED check uses Russian-exclusive character detection (ы/э/ё/ъ) and minimum word-count threshold to avoid flagging legitimately identical short words; length-ratio skip applies only to short Cyrillic sources (abbreviation expansions)
-- **Hunspell spell-check** — per-language `SPELL_ERROR` warnings; uses system dictionaries on Linux and app-bundled dictionaries on Windows/macOS (populate via `scripts/fetch_dictionaries.py`)
-- **AI quality model** (`qcgemma4-st`) — fine-tuned Gemma 4 E4B that detects 16 issue codes with chain-of-thought reasoning and structured `VERDICT: GOOD / ISSUES_FOUND` output with `AUTOFIX`/`RETRANSLATE` recommendations
-- **Font & Glyph Checker** — parses Scaleform SWF font atlases and TTF/OTF cmap tables; flags translation characters that will render as squares in-game and suggests auto-fixable substitutes
-- **Auto-Fix All** — one-click batch application of all mechanically correctable issues (whitespace, capitalization, character substitution, missing newlines, truncated translations, unclosed guillemets)
-- **Per-code hide filter** — suppress specific QC issue codes from the results table for the current session
-- **Retranslation queue** — strings flagged by QC are queued and retranslated with a per-string hint describing what went wrong
-- **Error-code filter** — filter QC results by code (MISSING_TAGS, NEWLINE_COUNT_MISMATCH, etc.)
-- **Consistency checker** (Ctrl+Alt+K) — finds the same source string translated differently across the file, with canonical-form picker and batch replace
-- **Ukrainian gender agreement checker** (Ctrl+Alt+G) — detects adjective/noun gender mismatches using a noun-gender dictionary, with inline fix suggestions
-- **ти/ви register checker** (Ctrl+Alt+R) — finds mixed formal/informal address within a file and reports each violation with context
-- **Plugin validator** — scans ESP/ESM for NPC dialogue camera bugs: missing Localized flag, stray DIAL/SCEN/INFO records, ONAM overrides, missing master dependencies
-
-### Review tools
-- **Visual Context Preview** (Ctrl+Shift+P) — dockable panel that renders the current string inside a faithful recreation of the Bethesda UI using actual game fonts extracted from `fonts_uk.swf` / `fonts_en.swf`; pixel-exact borders, noise tile, and dark gradient from `dialoguemenu.swf`; auto-detects context type (Dialogue, Quest, Book, Note, Terminal, UI); colour-coded overflow indicator; Source/Translation/Both view modes
-- **Dialogue Tree Visualizer** — interactive quest → topic → response node graph (Translation → Dialogue Tree) with Starfield dark-space visual theme; click any node to jump to that string in the table
-- **Audio / TTS Preview** (Ctrl+Shift+A) — dockable panel with eSpeak-NG and Piper backends; synthesizes a TTS read-out of the translation so timing can be compared against the original game audio; colour-coded timing bar (green ≤ 110 %, orange ≤ 130 %, red > 130 %)
-- **Native Starfield voice playback** — decodes the original Wwise `.wem` voice clip for a dialogue line straight from the game's `*Voices*.ba2` archives (FormID → voice clip, via `vgmstream-cli`) and plays it back in the audio panel alongside the TTS read-out; in ESP/ESM mode the row's FormID auto-fills
-- **Speaker (NPC) panel** — shows who voices the selected dialogue line (name, gender, faction, category, raw voice type, plus "also voiced by" for shared lines) by parsing the Wwise voice-type folder name; tabified with the Audio panel
-- **Version comparison** — diff two game versions, migrate unchanged translations, export CSV/HTML reports; batch folder comparison
-- **Diff viewer** — side-by-side word-level or character-level diff; editable right pane with live diff update; HTML export
-- **Advanced search** — regex and fuzzy search across source and translation columns; batch Find & Replace
-
-### UI / workflow
-- **Zen / Focus Mode** (F11) — full-screen distraction-free editor with large source and translation panels, pending-string counter, per-string status badge
-- **Multi-monitor / detached panes** — Translation Editor dock (Ctrl+Shift+E) floats to any monitor; Pop Out String List (Ctrl+Shift+L) opens a second table window sharing the same selection model
-- **Claude AI Assistant dock** (Ctrl+Shift+C) — chat about the current string and apply Claude's suggested translation with one click
-- **Command palette** (Ctrl+K) and vim-style navigation (j/k, G)
-- **Translation sessions** — named work sessions with persistent search/filter state (Ctrl+Shift+N new, Ctrl+Shift+S save)
-- **Macro recorder** (Ctrl+M) — record and replay sequences of edit operations as named macros
-- **Keyboard shortcuts editor** — rebind any action
-- **F7** → jump to next untranslated; **Ctrl+Enter** → approve; **Ctrl+R** → reject
-- **Encoding detection** — auto-detects UTF-8, CP1251, CP1252, CP1250, GBK/GB2312, BOM variants; override per-file
-- **Themes** — 16 built-in themes: Slate, Midnight, Nord, Dracula, Catppuccin, Light, Solarized Dark, Solarized Light, Gruvbox, Tokyo Night, Monokai, One Dark, Sepia, Starfield, Starfield Terminal, High Contrast; plus custom QSS file support
-- **GPU monitor** — status bar widget showing GPU utilisation, VRAM usage, and temperature (AMD via Linux sysfs; NVIDIA via `nvidia-smi` on Linux/Windows/macOS; auto-hides if no GPU found)
-- **Ollama model auto-detection** — the model dropdown in Settings loads installed models automatically and keeps refreshing while the window is open, so a model pulled with `ollama pull` shows up without clicking Refresh
-- **Ollama force-stop** — frees a wedged GPU by restarting the Ollama service; on Linux a privileged restart uses the app's own Qt-themed password dialog (`sudo -S`, with askpass/pkexec fallback), on Windows it stops the service via `taskkill` with no console flash
-- **UI translations** — interface available in Ukrainian ✓, German, Spanish, French, Polish, Czech, Korean (community WIP)
-- **Cross-platform desktop notifications** on batch completion — `notify-send`/D-Bus on Linux, native system-tray balloons on Windows and macOS
-- **Native OS integration** — native Explorer/Finder file dialogs on Windows/macOS; config stored in the OS-native location (`%APPDATA%` on Windows, `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME`/`~/.config` on Linux) with owner-only file permissions
-- **"What's New" panel** — recent GitHub release notes are fetched and rendered on the welcome screen after the welcome card
-- **Automatic update check** — checks the GitHub releases API on startup and offers to download a newer build (toggle in Settings)
-- **Crash recovery** — periodic auto-save; recovery dialog offered at startup if the previous session ended unexpectedly
-- **Security audit log** — append-only JSON-lines file recording file operations and translation batches; API keys stored in system keyring with AES-256-GCM file fallback
-
----
-
-## Requirements
-
-- Python 3.10+
-- [Ollama](https://ollama.com) running locally (or a Claude API key for the Claude backend)
-- Audio playback is auto-detected per platform: Linux uses `paplay`, `ffplay`, or `aplay`; macOS uses `afplay` (or `ffplay`); Windows uses `ffplay` or the built-in PowerShell WAV player
-- Native Starfield voice playback requires `vgmstream-cli` on PATH (decodes Wwise `.wem` clips)
+## 설치 및 실행
 
 ```bash
 pip install -r requirements.txt
-```
-
-Core dependencies: `PySide6>=6.6`, `requests>=2.31`, `cryptography>=43.0`, `anthropic>=0.25`
-
-Optional:
-- `keyring>=25.0` — API key storage in system keyring
-- `hunspell>=0.5.5` or `spylls>=0.1.7` — spell-check engine (hunspell CLI used as fallback); run `scripts/fetch_dictionaries.py` to bundle Hunspell dictionaries for Windows/macOS
-- `curl-cffi>=0.7` — free-user NexusMods downloads via browser cookies
-
----
-
-## Running
-
-```bash
 python main.py
 ```
 
-Logs are written to both stdout and `translator.log` in the project root.
+Windows에서는 `run_bsek.bat`을 더블클릭하면 됩니다 (BSE 폴더 안에 위치해야 함).
+
+핵심 의존성: `PySide6>=6.6`, `requests>=2.31`, `cryptography>=43.0`
+
+선택 의존성:
+- `keyring>=25.0` — API 키를 시스템 키링에 저장 (없으면 암호화 파일로 폴백)
+- `anthropic>=0.25` — Claude API 백엔드 사용 시
+- `curl-cffi>=0.7` — NexusMods 무료 계정 다운로드
+- `py7zr>=0.20` — `.7z` 아카이브 압축 해제
+
+로그는 stdout과 프로젝트 루트의 `translator.log`에 기록됩니다.
 
 ---
 
-## Project structure
+## 프롬프트 에디터 사용법
+
+`Translation > Prompt Editor…` (또는 메뉴에서 "프롬프트 편집기") 로 엽니다.
+
+- **Persona (정체성/역할)** — 번역가의 정체성 문장. 비워두면 기본값 사용.
+- **Additional Rules (추가 규칙)** — 스타일 규칙. 비워두면 BSEK 기본 규칙
+  (게임 태그 보존 포함) 자동 적용. 내용을 입력하면 기본 규칙 전체를 대체합니다.
+- **Preset** — Save / Save As / Rename / Delete로 여러 프롬프트 세트를 관리.
+- **Preview Full Prompt** — 실제로 모델에 전송될 프롬프트 전체를 확인.
+- **베이스 규칙 복사** — BSEK 기본 규칙 전체를 Additional Rules 칸으로 불러와서
+  이어서 편집할 수 있습니다.
+
+⚠️ Additional Rules에 내용을 입력하면 게임 태그 보존(`%s`, `[[STRUCT_BREAK...]]` 등)
+규칙도 함께 사라집니다. 다른 게임/언어쌍용으로 완전히 새로 작성하는 게 아니라면
+"베이스 규칙 복사"로 먼저 불러온 뒤 수정하는 것을 권장합니다.
+
+---
+
+## 원본 기능 (계속 지원)
+
+아래는 원본 프로젝트에서 물려받아 계속 사용 가능한 기능들입니다.
+
+### 파일 지원
+- 바이너리 문자열 파일: `.strings`, `.dlstrings`, `.ilstrings`
+- BA2 아카이브 (Starfield v2, GNRL 타입)
+- ESP/ESM 플러그인 (비-로컬라이즈드 플러그인)
+- ESP/ESM 모드 업데이트 마이그레이션 — 구버전/신버전 플러그인 diff 후 기존 번역 이전
+- VMAD 스크립트 속성 분석 (Papyrus)
+- Starfield 인터페이스 TXT (`translate_en.txt`)
+- xTranslator SST XML 가져오기/내보내기
+- NexusMods 번역 브라우저 — 기존 번역 모드 검색/다운로드/병합
+
+### 품질 검사
+- 20개 이상 자동 검사 (누락/추가 태그, 미번역, 원문 언어 잔존, 줄바꿈 불일치 등)
+- Hunspell 맞춤법 검사
+- AI 품질 검사 모델 (`qcgemma4-st`)
+- 폰트/글리프 검사기 — 번역 글자가 게임 내 폰트에서 네모(□)로 깨지는지 검사
+- 자동 수정 (Auto-Fix All)
+- 일관성 검사기 (Ctrl+Alt+K)
+
+### 리뷰 도구
+- Visual Context Preview (Ctrl+Shift+P) — 실제 게임 폰트로 미리보기
+- Dialogue Tree Visualizer — 퀘스트 대화 트리 시각화
+- Audio/TTS Preview (Ctrl+Shift+A) — 음성 합성 미리듣기, 원본 Wwise 음성 재생
+- 버전 비교, Diff 뷰어, 고급 검색
+
+### UI / 워크플로우
+- Zen/Focus 모드 (F11)
+- 멀티모니터 / 분리 패널
+- Command palette (Ctrl+K), vim 스타일 내비게이션
+- 번역 세션, 매크로 녹화
+- 16개 내장 테마
+- 크래시 복구, 보안 감사 로그
+
+전체 상세 기능 목록은 원본 저장소의 README를 참고하세요.
+
+---
+
+## 프로젝트 구조
 
 ```
-bethesda_strings/              Pure Python parsing library (no Qt dependency)
-  core.py                      Binary parser/writer for .strings/.dlstrings/.ilstrings
-  ba2_handler.py               BA2 archive reader/writer (Starfield v2, FO4 v1)
-  esp_handler.py               ESP/ESM plugin parser (non-localized plugins)
-  esp_diff.py                  ESP/ESM mod-update migration (FormID-keyed diff)
-  vmad_handler.py              VMAD Papyrus script-property parser/classifier/byte-splice editor
-  wwise_voice.py               Wwise voice index — FormID → original .wem clip from Voices BA2
-  txt_handler.py               Starfield interface TXT parser (translate_en/ru.txt)
-  xml_handler.py               xTranslator SST XML import/export
-  encoding.py                  Encoding detection and conversion
-  version_diff.py              Game-version diff and translation migration
-  character_profiles.py        Character persona profile definitions
-  font_checker.py              SWF/TTF glyph coverage checker (library layer)
-  lore_db.py                   SQLite FTS5 lore database and UESP downloader
-  dialogue_tree.py             Quest → Topic → Response tree parser
+bethesda_strings/              순수 파이썬 파싱 라이브러리 (Qt 비의존)
+  core.py                      .strings/.dlstrings/.ilstrings 바이너리 파서
+  ba2_handler.py                BA2 아카이브 리더/라이터
+  esp_handler.py                ESP/ESM 플러그인 파서
+  txt_handler.py                Starfield 인터페이스 TXT 파서
+  ...
 
-gui/                           PySide6 application layer
-  main_window.py               Top-level window, file I/O, translation orchestration
-  ollama_worker.py             QThread worker — parallel calls, per-language prompts, AI-fix mode
-  ollama_control.py            Ollama service force-stop/restart helper (sudo/taskkill)
-  sudo_dialog.py               Qt-themed sudo password prompt (sudo -S over stdin)
-  claude_translation_worker.py Claude API drop-in replacement for OllamaWorker
-  claude_chat_panel.py         Dockable AI assistant chat panel
-  gpu_monitor.py               Status bar GPU utilisation widget (AMD sysfs + NVIDIA nvidia-smi)
-  visual_context_preview.py    Game-accurate string rendering using extracted SWF fonts/assets
-  dialogue_tree_dialog.py      Interactive quest → topic → response node graph
-  audio_preview_panel.py       TTS preview dock + native Wwise voice playback (eSpeak-NG / Piper)
-  tts_engine.py                TTS synthesis engine
-  speaker_map.py               Wwise voice-type → speaker (name/gender/faction) parser
-  speaker_panel.py             Speaker (NPC) dock — who voices the selected line
-  focus_overlay.py             Zen / full-screen focus mode
-  lore_rag_manager.py          SQLite FTS5 lore database + UESP downloader
-  lore_rag_dialog.py           Lore database management dialog
-  quality_checker.py           Post-translation QA checks (20+ codes) and auto-fix
-  quality_dialog.py            QA results dialog — filtering, per-code hide, auto-fix, retranslation
-  ai_qc_worker.py              Worker thread for qcgemma4-st quality model
-  spell_checker.py             Hunspell spell-check wrapper (3 backends: lib / spylls / CLI)
-  font_checker_dialog.py       SWF/TTF glyph coverage checker dialog
-  string_table.py              QAbstractTableModel for strings, ESP, and TXT modes
-  term_protector.py            Placeholder-based term protection (8000+ terms)
-  translation_cache.py         SHA-256-keyed persistent translation cache
-  translation_memory.py        Pre-loaded map of string ID → known-good translation
-  glossary.py                  Glossary data model, CSV/TBX/JSON I/O
-  consistency_checker.py       Finds inconsistent translations of identical source strings
-  gender_checker.py            Ukrainian adjective/noun gender agreement checker
-  register_checker.py          ти/ви formal/informal register consistency checker
-  vmad_dialog.py               VMAD script-property analysis UI (risk-coloured, byte-splice apply)
-  esp_migrate_dialog.py        ESP/ESM mod-update migration UI (FormID-keyed diff)
-  version_compare_dialog.py    Game-version diff UI, migration, CSV/HTML export
-  diff_viewer.py               Side-by-side word/character-level diff viewer
-  pre_translation_estimator.py Difficulty scorer (0–100) with weight learning
-  profile_editor_dialog.py     Character persona profile editor
-  profile_assign_dialog.py     Assign persona profiles to strings / quests
-  keyboard_manager.py          Rebindable shortcuts, vim navigation, command palette
-  session_manager.py           Named work sessions with persistent search/filter state
-  macro_recorder.py            Record/replay sequences of edit operations as macros
-  theme_manager.py             16 built-in QSS themes + custom theme loader
-  nexusmods_uploader.py        NexusMods v3 multipart upload client
-  nexusmods_browser_dialog.py  NexusMods translation browser (card grid, async thumbnails)
-  nexusmods_client.py          NexusMods REST v1 + GraphQL v2 API client
-  app_settings.py              AppSettings dataclass, JSON + QSettings persistence
-  secret_store.py              API key storage (keyring + AES-256-GCM fallback)
-  audit_log.py                 Append-only security audit log (JSON-lines)
-  updater.py                   GitHub release update check + welcome "What's New" changelog
-  desktop_notify.py            Cross-platform batch-complete notifications (notify-send / tray)
-  crash_recovery.py            Periodic auto-save and recovery dialog
+gui/                           PySide6 애플리케이션 레이어
+  main_window.py                최상위 윈도우, 파일 I/O, 번역 오케스트레이션
+  ollama_worker.py               로컬 Ollama 번역 워커 + 프롬프트 빌더
+                                 (DEFAULT_PERSONA, DEFAULT_CUSTOM_RULES,
+                                 default_rules_block(), set_prompt_overrides())
+  openai_compat_worker.py        BSEK 신규 — OpenAI 호환(Gemini/ChatGPT) 번역 워커
+  openai_compat_client.py        BSEK 신규 — 클라우드 API 키 SecretStore 저장
+  prompt_editor_dialog.py        BSEK 신규 — 프롬프트 에디터 GUI
+  prompt_presets.py              BSEK 신규 — 프롬프트 프리셋 CRUD 로직
+  claude_translation_worker.py   Claude API 번역 워커
+  quality_checker.py             번역 후 QA 검사 (20개 이상 코드)
+  term_protector.py              고유명사 보호 (플레이스홀더 치환)
+  translation_cache.py           SHA-256 키 기반 번역 캐시
+  glossary.py                    용어집 데이터 모델
+  theme_manager.py               16개 내장 테마 + get_hint_color() 헬퍼
+  updater.py                     GitHub 릴리스 업데이트 확인 (이 포크 저장소 대상)
+  app_settings.py                설정 저장/로드 (JSON + QSettings)
+  ...
 
-data/
-  fonts/                       Game fonts extracted from Starfield SWF assets
-    RF_35_M.ttf                Cyrillic body font (UK locale, $MAIN_Font)
-    RF_55_M.ttf                Cyrillic bold
-    RF_55_SB.ttf               Cyrillic semi-bold
-    NB_Architekt_Light.ttf     Latin body font (EN locale)
-    NB_Architekt.ttf           Latin bold
-  dialogue_bg_tile.png         50×50 noise tile from dialoguemenu.swf
-  *_words.txt                  Word lists for source-language leak detection (12 languages)
+gui/translations/
+  ko_KR.ts / ko_KR.qm            한국어 UI 번역 (1,589개 문자열)
 
-scripts/
-  apply_quality_fixes.py       CLI: apply auto-fixes from a JSON report to SST XML
-  extract_sharegpt_dataset.py  Export EN→target string pairs as ShareGPT JSONL
-  create_qc_dataset.py         Generate QC training dataset (14,928 examples, 16 issue codes)
-  compile_translations.sh      Recompile .ts → .qm UI translation files
-  fetch_dictionaries.py        Download Hunspell .aff/.dic dictionaries into dicts/ (Windows/macOS spell-check bundle)
-  download_lang_dicts.py       Download word-frequency lists into data/ (source-language leak detection)
-  extract_starfield_glossary.py Build starfield_glossary.json from string files
-
-packaging/
-  bethesda-strings-editor.desktop      Linux desktop entry (file associations)
-  bethesda-strings-editor-mime.xml     MIME-type definitions for .strings/.esp/.ba2
+run_bsek.bat                    Windows 더블클릭 실행기
+CHANGES.md                      이 포크에서의 상세 변경 이력
 ```
 
 ---
 
-## UI translation
+## 변경 이력
 
-UI translations live in `gui/translations/<locale>.ts`. After editing any `.ts` file:
-
-```bash
-./scripts/compile_translations.sh
-```
-
-Supported locales: `uk_UA`, `de_DE`, `fr_FR`, `es_ES`, `pl_PL`, `cs_CZ`, `ko_KR`.
+상세 변경 이력은 [CHANGES.md](CHANGES.md)를 참고하세요.
 
 ---
 
-## Tests
+## 테스트
 
 ```bash
 python -m pytest tests/
@@ -290,6 +243,7 @@ python -m pytest tests/
 
 ---
 
-## License
+## 라이선스
 
-MIT — see [LICENSE](LICENSE).
+MIT — [LICENSE](LICENSE) 참고. 원본 프로젝트인
+[0xra0/bethesda-strings-editor](https://github.com/0xra0/bethesda-strings-editor) 역시 MIT 라이선스입니다.
