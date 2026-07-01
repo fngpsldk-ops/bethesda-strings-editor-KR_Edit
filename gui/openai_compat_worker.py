@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Bump this when the prompt-construction logic changes in a way that should
 # invalidate cached translations produced by this worker.
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2  # bumped: added Rule 10 (quest imperative) + Rule 11 (register)
 
 
 class OpenAICompatWorker(QObject):

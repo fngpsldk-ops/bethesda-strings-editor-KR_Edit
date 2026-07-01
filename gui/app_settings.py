@@ -18,7 +18,7 @@ from PySide6.QtCore import QSettings
 
 logger = logging.getLogger(__name__)
 
-CONFIG_VERSION = 35  # Increment when schema changes
+CONFIG_VERSION = 36  # Increment when schema changes
 
 # Fields whose values are XOR-obfuscated with base64 in the on-disk JSON.
 # The in-memory value is always plaintext; only the serialized form is wrapped.
@@ -428,6 +428,23 @@ def _migrate_config(data: dict, from_version: int) -> dict:
         data.setdefault("ollama_restart_elevate", False)
         data["config_version"] = CONFIG_VERSION
         logger.info("Migrated config to v35: added ollama_restart_elevate setting")
+
+    if from_version < 36:
+        # BSEK: this fork only supports English<->Korean (Japanese kept as a
+        # reference language — see CHANGES.md). Configs carried over from the
+        # original multi-language BSE (or an older BSEK build) may still have
+        # default_source_lang/default_target_lang set to a locale code that is
+        # no longer in SUPPORTED_LANGUAGES (de/es/fr/it/pl/ptbr/zhhans/ru/uk).
+        # Leaving one of those in place would make the language dropdown fail
+        # to resolve a selection (QComboBox.findData() returns -1), so normalize
+        # any unsupported code back to our defaults here.
+        _bsek_supported = {"en", "ja", "ko"}
+        if data.get("default_source_lang") not in _bsek_supported:
+            data["default_source_lang"] = "en"
+        if data.get("default_target_lang") not in _bsek_supported:
+            data["default_target_lang"] = "ko"
+        data["config_version"] = CONFIG_VERSION
+        logger.info("Migrated config to v36: normalized language codes to BSEK-supported set (en/ja/ko)")
 
     if from_version < CONFIG_VERSION:
         logger.warning(

@@ -584,6 +584,24 @@ class TranslationRequest:
             "'(A better translation would be...)'. If you are unsure, output your single best "
             "Korean translation with nothing after it.\n"
             "9. Never output the same translation twice. Produce exactly one translation per input.\n"
+            "10. Quest objectives, mission logs, and player-directed action prompts "
+            "(text telling the player what to do — e.g. 'Attempt to steal fuel', "
+            "'Speak to the captain', 'Investigate the signal') should be phrased as a "
+            "polite imperative command ending in ~하십시오 or ~하세요, matching how "
+            "Starfield's quest log addresses the player. Do NOT translate these as a "
+            "flat description of an action (e.g. avoid '...하려 시도합니다'); phrase them "
+            "as an instruction to the player. "
+            "Example: 'Attempt to undetectably steal any available fuel from a docked "
+            "vessel.' → '도킹 중인 함선에서 감지되지 않고 사용 가능한 연료를 훔치십시오.'\n"
+            "11. Match speech register (반말 vs 존댓말) to the speaker's apparent social "
+            "role, inferred from tone and context — not a fixed rule per character. "
+            "Rough, hostile, or criminal-sounding dialogue (pirates, threats, insults, "
+            "smugglers) generally reads more naturally in 반말. Professional, commercial, "
+            "or civic dialogue (shopkeepers, officials, ship computers, customer-facing "
+            "announcements) generally reads more naturally in 존댓말. UI labels, system "
+            "messages, and menu text should default to a neutral/formal register. When "
+            "genuinely unsure, prefer 존댓말 — it is the safer default for a general "
+            "audience.\n"
         )
 
         # Source-language note (e.g. Russian needs a "don't transliterate" reminder).
@@ -894,7 +912,7 @@ class OllamaWorker(QObject):
         - prompt rule changes -> bump PROMPT_VERSION below
         """
         import hashlib as _hl
-        PROMPT_VERSION = 1  # bump this when you change prompt rules
+        PROMPT_VERSION = 2  # bumped: added Rule 10 (quest imperative) + Rule 11 (register)
         parts = [f"pv{PROMPT_VERSION}"]
         if self.glossary_manager is not None:
             try:
