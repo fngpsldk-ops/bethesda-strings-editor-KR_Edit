@@ -262,9 +262,16 @@ class PromptEditorDialog(QDialog):
 
     # ── preset actions ───────────────────────────────────────────────────────
     def _on_preset_selected(self, name: str) -> None:
-        """Load the selected preset's text into the editor (does not apply it)."""
+        """Load the selected preset's text into the editor (does not apply it).
+
+        Selecting "BSEK 기본값" clears the editor back to empty (= use BSEK
+        defaults) — it must NOT leave whatever text was typed for the
+        previously selected preset sitting in the boxes.
+        """
         self._update_preset_buttons_enabled()
         if not name or name == BUILTIN_DEFAULT_LABEL:
+            self.persona_edit.setPlainText("")
+            self.rules_edit.setPlainText("")
             return
         entry = get_preset(self._settings, name)
         if entry is not None:
