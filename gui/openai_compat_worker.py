@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Bump this when the prompt-construction logic changes in a way that should
 # invalidate cached translations produced by this worker.
-PROMPT_VERSION = 3  # bumped: persona/custom_rules are now GUI-editable overrides
+PROMPT_VERSION = 4  # bumped: base prompt (rules 1-9, persona, bracket examples) translated to Korean
 
 
 class OpenAICompatWorker(QObject):
