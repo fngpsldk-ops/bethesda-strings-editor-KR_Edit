@@ -111,8 +111,10 @@ class PromptEditorDialog(QDialog):
 
         intro = QLabel(self.tr(
             "번역 프롬프트의 정체성(페르소나)과 스타일 규칙을 직접 편집할 수 있습니다.\n"
-            "게임 태그 보존, 용어집 강제 등 안전 관련 규칙은 여기서 편집되지 않으며\n"
-            "항상 자동으로 적용됩니다."
+            "Additional Rules를 비워두면 BSEK 기본 규칙(게임 태그 보존, 용어집 강제 등)이\n"
+            "자동으로 적용됩니다. 내용을 입력하면 기본 규칙 전체를 대체합니다 — 다른 게임용으로\n"
+            "새로 작성하려면 비워둔 채로 시작하고, 기존 규칙 위에 이어서 쓰려면 아래 '베이스\n"
+            "규칙 복사' 버튼으로 먼저 복사해 오세요."
         ))
         self._register_hint_label(intro, "font-size: 11px;")
         layout.addWidget(intro)
@@ -174,19 +176,28 @@ class PromptEditorDialog(QDialog):
         self.rules_edit.textChanged.connect(self._on_text_changed)
         rules_layout.addWidget(self.rules_edit)
         rules_hint = QLabel(self.tr(
-            "비워두면 BSEK 기본 규칙(퀘스트 명령형 어투, 반말/존댓말 가이드)을 사용합니다.\n"
-            "번호는 자유롭게 매기되, 안전 규칙(1~9번)과 겹치지 않게 10번부터 시작을 권장합니다."
+            "비워두면 BSEK 기본 규칙(게임 태그 보존, 대괄호 처리, 용어집 강제, 퀘스트\n"
+            "명령형 어투, 반말/존댓말 가이드 등 1~11번 전체)을 사용합니다. 여기에 내용을\n"
+            "입력하면 그 기본 규칙 전체를 대체합니다 — 기존 규칙 위에 이어서 쓰려면\n"
+            "'베이스 규칙 복사'를 먼저 눌러 불러오세요."
         ))
         self._register_hint_label(rules_hint, "font-size: 11px; font-style: italic;")
         rules_layout.addWidget(rules_hint)
         rules_group.setLayout(rules_layout)
         layout.addWidget(rules_group, 1)
 
-        # ── Reset + Preview row ──────────────────────────────────────────────
+        # ── Reset + Copy Base + Preview row ───────────────────────────────────
         tools_row = QHBoxLayout()
         self.btn_reset_default = QPushButton(self.tr("Reset to BSEK Default"))
         self.btn_reset_default.clicked.connect(self._on_reset_default)
         tools_row.addWidget(self.btn_reset_default)
+        self.btn_copy_base_rules = QPushButton(self.tr("베이스 규칙 복사"))
+        self.btn_copy_base_rules.setToolTip(self.tr(
+            "BSEK 기본 규칙(1~11번) 전체를 Additional Rules 칸에 불러옵니다.\n"
+            "여기서부터 수정/확장하거나 다른 게임용으로 고쳐 쓸 수 있습니다."
+        ))
+        self.btn_copy_base_rules.clicked.connect(self._on_copy_base_rules)
+        tools_row.addWidget(self.btn_copy_base_rules)
         tools_row.addStretch(1)
         self.btn_preview = QPushButton(self.tr("Preview Full Prompt"))
         self.btn_preview.clicked.connect(self._on_preview)
@@ -356,6 +367,24 @@ class PromptEditorDialog(QDialog):
         self.persona_edit.setPlainText("")
         self.rules_edit.setPlainText("")
         self.combo_preset.setCurrentIndex(0)  # BUILTIN_DEFAULT_LABEL
+
+    def _on_copy_base_rules(self) -> None:
+        """Load the full BSEK default rule set (game-tag preservation,
+        bracket-token categories, glossary enforcement, quest-imperative
+        phrasing, register guidance — everything Rules 1-11 normally cover)
+        into the Additional Rules box as an editable starting point.
+
+        Only the rules box is touched; persona is left as-is. This is the
+        recommended way to build a rule set for a different game (Skyrim,
+        Fallout, ...) without losing the Starfield rules as a reference —
+        copy them here first, then edit/replace what needs to change.
+        """
+        from gui.ollama_worker import default_rules_block
+
+        target_lang = getattr(self._settings, "default_target_lang", "ko") or "ko"
+        self.rules_edit.setPlainText(default_rules_block(target_lang))
+        self._preview_timer.stop()
+        self._refresh_preview_if_visible()
 
     def _on_text_changed(self) -> None:
         """Fix #3: debounce a live preview refresh while the user types,

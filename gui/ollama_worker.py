@@ -268,6 +268,96 @@ def get_prompt_overrides() -> tuple[str, str]:
     return _active_persona, _active_custom_rules
 
 
+def default_rules_block(target_lang: str = "ko") -> str:
+    """Return the built-in BSEK (Starfield) rules block as plain text:
+    "규칙:\n1. ... 9." followed by the default Rules 10-11 (quest-imperative
+    phrasing + register guidance).
+
+    Used both by to_system_prompt() (when the user has not written custom
+    rules) and by the Prompt Editor GUI's "Copy Base Rules" button, so a
+    user repurposing BSEK for another game (Skyrim, Fallout, ...) can copy
+    these Starfield-specific rules into the editor as a starting point
+    instead of writing an entirely new rule set from nothing.
+    """
+    style_rule = _TARGET_STYLE.get(
+        target_lang,
+        f"Write natural, polished text appropriate to the setting's tone. "
+        f"Match the register: formal stays formal, casual stays casual.",
+    )
+    rules_block = (
+        f"규칙:\n"
+        f"1. {style_rule}\n"
+        "2. 다음 서식 토큰은 절대 변경하지 말고 그대로 보존하세요: <Alias=…>, <font>, "
+        "[[TK_…]], [[STRUCT_BREAK_SGL_N]], [[STRUCT_BREAK_DBL_N]], "
+        "\\n, \\t, %s, %d, %f, %.1f, %.2f, %.3f, %g, %e, %i, %u, %x, %%, %1$s, %2$d, #IDs. "
+        "[[STRUCT_BREAK_SGL_N]]이나 [[STRUCT_BREAK_DBL_N]]이 입력에 나오면 "
+        "같은 위치에 그대로 출력하세요 — \\n이나 다른 형태로 절대 바꾸지 마세요. "
+        "이 토큰들을 변형·분할·번역하지 마세요.\n"
+        "3. 대괄호 [] — 네 가지 카테고리:\n"
+        "   a) 번역: 대화 선택지 및 스킬 태그는 대괄호는 유지하고 안의 단어만 번역: "
+        "[Lie]→[거짓말], [Flirt]→[유혹], [Persuade]→[설득], "
+        "[Intimidation]→[협박], [Speech]→[화술], [Commerce]→[상업], "
+        "[Diplomat]→[외교관], [Distraction]→[주의 분산], [Extortion]→[갈취], "
+        "[Piracy]→[해적 행위], [Romance]→[로맨스], [Lethal]→[치명적], "
+        "[Friendship]→[우정], [Commitment]→[헌신], [Evidence]→[증거], "
+        "[Security]→[보안], [Engineering]→[공학], [Soldier]→[병사], "
+        "[Surveying]→[탐사], [Scavenging]→[약탈], "
+        "[Xenobiologist]→[외계생물학자], [Industrialist]→[산업가], "
+        "[Robotics]→[로봇공학], [Cyberneticist]→[사이버네틱스 전문가], "
+        "[MedPack]→[구급상자], [Chems]→[자극제], [Syringe]→[주사기], "
+        "[Wave]→[손짓], [Strikers]→[스트라이커].\n"
+        "   b) 보존: 키보드/게임패드 조작 바인딩 토큰은 그대로 유지 — "
+        "[Attack], [AltAttack], [SecondaryAttack], [PrimaryAttack], [Jump], [Sprint], [Sneak], [Back], "
+        "[Melee], [Hack], [Pick], [Repair], [Sort], [Left], [Right], [Up], [Down], [Forward], "
+        "[Move], [Look], [Boosters], [Cruise], [Steady], "
+        "[L3], [R3], [LShoulder], [RShoulder], [LTrigger], [RTrigger], [XButton], "
+        "[LeftStick], [RightStick], [StrafeLeft], [StrafeRight], [TogglePOV], [ReadyWeapon], "
+        "[QuickInventory], [SelectTarget], [NextTarget], [PrevTarget], [TakeOff], "
+        "[Accept], [Activate], [Cancel], [Confirm], [Reject], [Submit], [Edit], [Exit], "
+        "[Play], [Leave], [Add], [All], [Yes], [No], [Click], "
+        "[DataMenu], [Monocle], [SHMonocle], [Crew], "
+        "[VehicleAim], [VehicleBoost], [VehicleExit], [VehicleFireWeapon], [VehicleHorn], "
+        "[VehicleVertBoost], [VehicleResetCamera], "
+        "[ExecuteJump], [StarbornPower], [WeaponGroup1], [WeaponGroup2], [WeaponGroup3], "
+        "[WeaponReadyReload], [Space], [Mouse2], "
+        "[RepairShip], [ShipBuilder], [ShipTransaction], [FastTravelShip], [CargoHold], "
+        "[ToggleTracking], [ToggleView], [TogglePrecise], [ChangeMode], "
+        "[PlaceBeacon], [PlaceMarker], [RotateLock], [RotatePick], "
+        "[QuickkeyDown], [Quickkey10], [StartWait], [ApplyCritical], "
+        "그리고 이와 비슷한 단일 동작 바인딩 전부.\n"
+        "   c) 보존: NPC 이름 참조 및 변수 자리표시자는 그대로 유지 — "
+        "[Andreja], [Vasco], [Hunter], [Sakharov], [Starborn], [Name], "
+        ".\n"
+        "   d) 번역: 전체 대문자 상태/문서 코드와 문장형 라벨 — "
+        "[CANCELED]→[취소됨], [CRITICAL]→[위험], [DELETED]→[삭제됨], "
+        "[DELIVERED]→[전달됨], [EMPTIED]→[비워짐], [OPTIMIZED]→[최적화됨], "
+        "[PARTICULATES]→[미립자], [PINGED]→[핑 전송됨], [PING]→[핑], "
+        "[REDACTED]→[편집됨], [VATS]→[VATS]; "
+        "그 외: [Restored]→[복구됨], [Decrypted]→[해독됨], [Redacted]→[편집됨], "
+        "[Deleted]→[삭제됨], [Signed]→[서명됨], "
+        "[Optional]→[선택사항], [Unfinished]→[미완성], [Temporary]→[임시], "
+        "[Unknown]→[알 수 없음], [Maintenance]→[정비 중], "
+        "[Volcanic]→[화산], [Forest]→[삼림], [Desert]→[사막], "
+        "[Albino]→[백색증], [Common]→[일반].\n"
+        "   e) 번역: 여러 단어나 완전한 문장이 들어간 대괄호 내용 "
+        "(출판사 노트, 편집자 주석, 책 요약, 서술적 여담 등). "
+        "대괄호 기호([, ])는 원문 그대로 두고, 안의 텍스트는 전부 번역하되 "
+        "단락 구분은 보존하세요. "
+        "예: [The second part is over 700 pages long.]→"
+        "[두 번째 부분은 700쪽이 넘습니다.]\n"
+        "4. 원문에 없는 따옴표를 추가하지 마세요.\n"
+        "5. 앞뒤 공백을 원문 그대로 보존하세요.\n"
+        "6. 원문의 구두점과 대소문자를 정확히 맞추세요.\n"
+        "7. 괄호 () 안의 내용도 번역하세요 — 원어 그대로 두지 마세요.\n"
+        "8. 중요: 한국어 번역문만 출력하세요. 영어 설명, 참고사항, 대안, "
+        "'(더 적절한 번역은...)' 같은 메타 코멘트를 절대 추가하지 마세요. "
+        "확신이 없으면 가장 나은 번역 하나만 출력하고 그 뒤에 아무것도 붙이지 마세요.\n"
+        "9. 같은 번역을 두 번 출력하지 마세요. 입력 하나당 번역 하나만 만드세요.\n"
+    )
+    rules_block += DEFAULT_CUSTOM_RULES.rstrip("\n") + "\n"
+    return rules_block
+
+
 # ── Per-language prompt data ──────────────────────────────────────────────────
 
 # Full display name used in the "To {Language}:" user-turn prefix that
@@ -576,94 +666,28 @@ class TranslationRequest:
                 fix_base += "\nGlossary (use these exact translations):\n" + self.glossary_snippet
             return fix_base
 
-        style_rule = _TARGET_STYLE.get(
-            self.target_lang,
-            f"Write natural, polished {tgt_name} appropriate to Starfield's "
-            f"NASApunk sci-fi setting. Match the register: formal stays formal, "
-            f"casual stays casual.",
-        )
-
         persona_text = _active_persona or DEFAULT_PERSONA
-        base = (
+        intro = (
             f"{persona_text}\n"
             f"{src_name} 텍스트를 자연스럽고 세련된 {tgt_name}로 번역하세요. "
             f"번역문만 출력하세요 — 머리말, 참고사항, 코멘트 없이.\n\n"
-            f"규칙:\n"
-            f"1. {style_rule}\n"
-            "2. 다음 서식 토큰은 절대 변경하지 말고 그대로 보존하세요: <Alias=…>, <font>, "
-            "[[TK_…]], [[STRUCT_BREAK_SGL_N]], [[STRUCT_BREAK_DBL_N]], "
-            "\\n, \\t, %s, %d, %f, %.1f, %.2f, %.3f, %g, %e, %i, %u, %x, %%, %1$s, %2$d, #IDs. "
-            "[[STRUCT_BREAK_SGL_N]]이나 [[STRUCT_BREAK_DBL_N]]이 입력에 나오면 "
-            "같은 위치에 그대로 출력하세요 — \\n이나 다른 형태로 절대 바꾸지 마세요. "
-            "이 토큰들을 변형·분할·번역하지 마세요.\n"
-            "3. 대괄호 [] — 네 가지 카테고리:\n"
-            "   a) 번역: 대화 선택지 및 스킬 태그는 대괄호는 유지하고 안의 단어만 번역: "
-            "[Lie]→[거짓말], [Flirt]→[유혹], [Persuade]→[설득], "
-            "[Intimidation]→[협박], [Speech]→[화술], [Commerce]→[상업], "
-            "[Diplomat]→[외교관], [Distraction]→[주의 분산], [Extortion]→[갈취], "
-            "[Piracy]→[해적 행위], [Romance]→[로맨스], [Lethal]→[치명적], "
-            "[Friendship]→[우정], [Commitment]→[헌신], [Evidence]→[증거], "
-            "[Security]→[보안], [Engineering]→[공학], [Soldier]→[병사], "
-            "[Surveying]→[탐사], [Scavenging]→[약탈], "
-            "[Xenobiologist]→[외계생물학자], [Industrialist]→[산업가], "
-            "[Robotics]→[로봇공학], [Cyberneticist]→[사이버네틱스 전문가], "
-            "[MedPack]→[구급상자], [Chems]→[자극제], [Syringe]→[주사기], "
-            "[Wave]→[손짓], [Strikers]→[스트라이커].\n"
-            "   b) 보존: 키보드/게임패드 조작 바인딩 토큰은 그대로 유지 — "
-            "[Attack], [AltAttack], [SecondaryAttack], [PrimaryAttack], [Jump], [Sprint], [Sneak], [Back], "
-            "[Melee], [Hack], [Pick], [Repair], [Sort], [Left], [Right], [Up], [Down], [Forward], "
-            "[Move], [Look], [Boosters], [Cruise], [Steady], "
-            "[L3], [R3], [LShoulder], [RShoulder], [LTrigger], [RTrigger], [XButton], "
-            "[LeftStick], [RightStick], [StrafeLeft], [StrafeRight], [TogglePOV], [ReadyWeapon], "
-            "[QuickInventory], [SelectTarget], [NextTarget], [PrevTarget], [TakeOff], "
-            "[Accept], [Activate], [Cancel], [Confirm], [Reject], [Submit], [Edit], [Exit], "
-            "[Play], [Leave], [Add], [All], [Yes], [No], [Click], "
-            "[DataMenu], [Monocle], [SHMonocle], [Crew], "
-            "[VehicleAim], [VehicleBoost], [VehicleExit], [VehicleFireWeapon], [VehicleHorn], "
-            "[VehicleVertBoost], [VehicleResetCamera], "
-            "[ExecuteJump], [StarbornPower], [WeaponGroup1], [WeaponGroup2], [WeaponGroup3], "
-            "[WeaponReadyReload], [Space], [Mouse2], "
-            "[RepairShip], [ShipBuilder], [ShipTransaction], [FastTravelShip], [CargoHold], "
-            "[ToggleTracking], [ToggleView], [TogglePrecise], [ChangeMode], "
-            "[PlaceBeacon], [PlaceMarker], [RotateLock], [RotatePick], "
-            "[QuickkeyDown], [Quickkey10], [StartWait], [ApplyCritical], "
-            "그리고 이와 비슷한 단일 동작 바인딩 전부.\n"
-            "   c) 보존: NPC 이름 참조 및 변수 자리표시자는 그대로 유지 — "
-            "[Andreja], [Vasco], [Hunter], [Sakharov], [Starborn], [Name], "
-            ".\n"
-            "   d) 번역: 전체 대문자 상태/문서 코드와 문장형 라벨 — "
-            "[CANCELED]→[취소됨], [CRITICAL]→[위험], [DELETED]→[삭제됨], "
-            "[DELIVERED]→[전달됨], [EMPTIED]→[비워짐], [OPTIMIZED]→[최적화됨], "
-            "[PARTICULATES]→[미립자], [PINGED]→[핑 전송됨], [PING]→[핑], "
-            "[REDACTED]→[편집됨], [VATS]→[VATS]; "
-            "그 외: [Restored]→[복구됨], [Decrypted]→[해독됨], [Redacted]→[편집됨], "
-            "[Deleted]→[삭제됨], [Signed]→[서명됨], "
-            "[Optional]→[선택사항], [Unfinished]→[미완성], [Temporary]→[임시], "
-            "[Unknown]→[알 수 없음], [Maintenance]→[정비 중], "
-            "[Volcanic]→[화산], [Forest]→[삼림], [Desert]→[사막], "
-            "[Albino]→[백색증], [Common]→[일반].\n"
-            "   e) 번역: 여러 단어나 완전한 문장이 들어간 대괄호 내용 "
-            "(출판사 노트, 편집자 주석, 책 요약, 서술적 여담 등). "
-            "대괄호 기호([, ])는 원문 그대로 두고, 안의 텍스트는 전부 번역하되 "
-            "단락 구분은 보존하세요. "
-            "예: [The second part is over 700 pages long.]→"
-            "[두 번째 부분은 700쪽이 넘습니다.]\n"
-            "4. 원문에 없는 따옴표를 추가하지 마세요.\n"
-            "5. 앞뒤 공백을 원문 그대로 보존하세요.\n"
-            "6. 원문의 구두점과 대소문자를 정확히 맞추세요.\n"
-            "7. 괄호 () 안의 내용도 번역하세요 — 원어 그대로 두지 마세요.\n"
-            "8. 중요: 한국어 번역문만 출력하세요. 영어 설명, 참고사항, 대안, "
-            "'(더 적절한 번역은...)' 같은 메타 코멘트를 절대 추가하지 마세요. "
-            "확신이 없으면 가장 나은 번역 하나만 출력하고 그 뒤에 아무것도 붙이지 마세요.\n"
-            "9. 같은 번역을 두 번 출력하지 마세요. 입력 하나당 번역 하나만 만드세요.\n"
         )
 
-        # BSEK: user-editable rules (Settings > Prompt Editor). Falls back to
-        # DEFAULT_CUSTOM_RULES (quest-imperative phrasing + register guidance)
-        # when the user has not customized this field.
-        custom_rules_text = _active_custom_rules or DEFAULT_CUSTOM_RULES
-        if custom_rules_text:
-            base += custom_rules_text.rstrip("\n") + "\n"
+        # BSEK: when the user has written Additional Rules text in the Prompt
+        # Editor, it REPLACES the entire built-in Starfield-specific rule set
+        # below (game-tag preservation, bracket-token categories, etc.) rather
+        # than being appended after it. This is deliberate: it lets BSEK be
+        # repurposed for other Bethesda games (Skyrim, Fallout, ...) by writing
+        # an entirely new rule set from scratch, instead of being permanently
+        # stuck with Starfield-only rules. The Prompt Editor has a "Copy Base
+        # Rules" button so the Starfield rules can be copied into the editor
+        # first and edited/extended, rather than rewritten from nothing.
+        if _active_custom_rules:
+            rules_block = _active_custom_rules.rstrip("\n") + "\n"
+        else:
+            rules_block = default_rules_block(self.target_lang)
+
+        base = intro + rules_block
 
         # Source-language note (e.g. Russian needs a "don't transliterate" reminder).
         src_extra = _SOURCE_EXTRA.get(self.source_lang, "")
