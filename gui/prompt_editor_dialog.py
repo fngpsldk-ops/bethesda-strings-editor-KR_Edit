@@ -18,7 +18,9 @@ underlying logic this dialog is a thin UI layer over):
   box edits — it does not undo a prior Apply in the same session.
 - The preset combo box is a *loader*, not a live indicator: selecting a
   preset copies its text into the editor for further editing; it does not
-  apply anything until Apply/OK is clicked.
+  apply anything until Apply/OK is clicked. The combo DOES remember which
+  preset (if any) was last applied, so reopening the dialog shows the right
+  selection instead of always resetting to "BSEK 기본값".
 """
 import logging
 from PySide6.QtWidgets import (
@@ -26,7 +28,7 @@ from PySide6.QtWidgets import (
     QComboBox, QPushButton, QDialogButtonBox, QGroupBox, QLabel,
     QTextEdit, QMessageBox, QInputDialog, QWidget,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 
 from gui.app_settings import AppSettings, save_settings
 from gui.prompt_presets import (
@@ -39,6 +41,29 @@ logger = logging.getLogger(__name__)
 _SAMPLE_SOURCE_TEXT = (
     "Attempt to undetectably steal any available fuel from a docked vessel."
 )
+
+# Debounce interval for live preview refresh while typing.
+_PREVIEW_REFRESH_DELAY_MS = 400
+
+
+class NoOverwriteTextEdit(QTextEdit):
+    """QTextEdit that ignores the Insert key.
+
+    Qt's default QTextEdit toggles overwrite mode when the user presses
+    Insert — a key that sits right next to Delete/Home on many keyboards and
+    is easy to hit by accident. Once toggled, every further keystroke
+    silently *replaces* existing characters instead of inserting new ones,
+    which looks like the editor is "eating" or overwriting text starting
+    wherever the cursor happens to be. Prompt text is precious enough (and
+    the failure mode confusing enough) that we simply disable the toggle
+    entirely rather than rely on users noticing and pressing Insert again.
+    """
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if event.key() == Qt.Key.Key_Insert:
+            event.accept()  # swallow — never toggle overwrite mode
+            return
+        super().keyPressEvent(event)
 
 
 class PromptEditorDialog(QDialog):
@@ -55,6 +80,11 @@ class PromptEditorDialog(QDialog):
         self._settings = settings
         self._theme_manager = theme_manager
         self._hint_labels: list = []
+
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(_PREVIEW_REFRESH_DELAY_MS)
+        self._preview_timer.timeout.connect(self._refresh_preview_if_visible)
 
         self.setWindowTitle(self.tr("Prompt Editor"))
         self.setMinimumSize(640, 620)
@@ -95,6 +125,13 @@ class PromptEditorDialog(QDialog):
         self.combo_preset.currentTextChanged.connect(self._on_preset_selected)
         preset_row.addWidget(self.combo_preset, 1)
 
+        self.btn_save = QPushButton(self.tr("Save"))
+        self.btn_save.setToolTip(self.tr(
+            "현재 선택된 프리셋을 지금 편집 중인 내용으로 덮어씁니다."
+        ))
+        self.btn_save.clicked.connect(self._on_save)
+        preset_row.addWidget(self.btn_save)
+
         self.btn_save_as = QPushButton(self.tr("Save As…"))
         self.btn_save_as.clicked.connect(self._on_save_as)
         preset_row.addWidget(self.btn_save_as)
@@ -113,11 +150,12 @@ class PromptEditorDialog(QDialog):
         # ── Persona ──────────────────────────────────────────────────────────
         persona_group = QGroupBox(self.tr("Persona (정체성/역할)"))
         persona_layout = QVBoxLayout()
-        self.persona_edit = QTextEdit()
+        self.persona_edit = NoOverwriteTextEdit()
         self.persona_edit.setPlaceholderText(
             "예: 당신은 전문 Starfield 게임 로컬라이제이션 번역가입니다."
         )
         self.persona_edit.setMaximumHeight(70)
+        self.persona_edit.textChanged.connect(self._on_text_changed)
         persona_layout.addWidget(self.persona_edit)
         persona_hint = QLabel(self.tr("비워두면 BSEK 기본 페르소나를 사용합니다."))
         self._register_hint_label(persona_hint, "font-size: 11px; font-style: italic;")
@@ -128,11 +166,12 @@ class PromptEditorDialog(QDialog):
         # ── Custom rules ─────────────────────────────────────────────────────
         rules_group = QGroupBox(self.tr("Additional Rules (추가 규칙)"))
         rules_layout = QVBoxLayout()
-        self.rules_edit = QTextEdit()
+        self.rules_edit = NoOverwriteTextEdit()
         self.rules_edit.setPlaceholderText(
             "예: 10. 현대 항공 무전 규칙을 따라 번역하세요.\n"
             "11. 인물 대사는 맥락에 따라 반말/존댓말을 판단하세요."
         )
+        self.rules_edit.textChanged.connect(self._on_text_changed)
         rules_layout.addWidget(self.rules_edit)
         rules_hint = QLabel(self.tr(
             "비워두면 BSEK 기본 규칙(퀘스트 명령형 어투, 반말/존댓말 가이드)을 사용합니다.\n"
@@ -161,6 +200,14 @@ class PromptEditorDialog(QDialog):
         self.preview_box.setStyleSheet("font-family: monospace; font-size: 11px;")
         self.preview_box.setMaximumHeight(180)
         layout.addWidget(self.preview_box)
+
+        preview_hint = QLabel(self.tr(
+            "미리보기가 열려 있으면 편집 중 자동으로 갱신됩니다."
+        ))
+        self._register_hint_label(preview_hint, "font-size: 10px; font-style: italic;")
+        self._preview_hint_label = preview_hint
+        preview_hint.setVisible(False)
+        layout.addWidget(preview_hint)
 
         # ── Apply-semantics note ────────────────────────────────────────────
         apply_note = QLabel(self.tr(
@@ -192,7 +239,10 @@ class PromptEditorDialog(QDialog):
         self.rules_edit.setPlainText(getattr(self._settings, "prompt_custom_rules", "") or "")
         self.persona_edit.blockSignals(False)
         self.rules_edit.blockSignals(False)
-        self._refresh_preset_combo()
+        # Fix #1: reopen with whichever preset was last applied selected,
+        # instead of always resetting to "BSEK 기본값".
+        active = getattr(self._settings, "prompt_active_preset", "") or BUILTIN_DEFAULT_LABEL
+        self._refresh_preset_combo(select=active)
 
     def _refresh_preset_combo(self, select: str = BUILTIN_DEFAULT_LABEL) -> None:
         self.combo_preset.blockSignals(True)
@@ -206,6 +256,7 @@ class PromptEditorDialog(QDialog):
 
     def _update_preset_buttons_enabled(self) -> None:
         is_real_preset = self.combo_preset.currentText() != BUILTIN_DEFAULT_LABEL
+        self.btn_save.setEnabled(is_real_preset)
         self.btn_rename.setEnabled(is_real_preset)
         self.btn_delete.setEnabled(is_real_preset)
 
@@ -219,6 +270,22 @@ class PromptEditorDialog(QDialog):
         if entry is not None:
             self.persona_edit.setPlainText(entry["persona"])
             self.rules_edit.setPlainText(entry["custom_rules"])
+
+    def _on_save(self) -> None:
+        """Fix #2: overwrite the currently selected preset with the editor's
+        current text, without prompting for a name (unlike Save As…)."""
+        name = self.combo_preset.currentText()
+        if name == BUILTIN_DEFAULT_LABEL:
+            return
+        try:
+            save_preset(
+                self._settings, name,
+                self.persona_edit.toPlainText(), self.rules_edit.toPlainText(),
+            )
+        except PresetNameError as e:
+            QMessageBox.warning(self, self.tr("Invalid Name"), str(e))
+            return
+        save_settings(self._settings)
 
     def _on_save_as(self) -> None:
         name, ok = QInputDialog.getText(
@@ -278,11 +345,18 @@ class PromptEditorDialog(QDialog):
         self.rules_edit.setPlainText("")
         self.combo_preset.setCurrentIndex(0)  # BUILTIN_DEFAULT_LABEL
 
-    def _on_preview(self) -> None:
-        """Show the exact system prompt that would be sent, using the text
-        currently typed in the editor (whether or not it has been applied
-        yet). Has no side effects on the live translation state — the
-        module-level active override is restored immediately afterward."""
+    def _on_text_changed(self) -> None:
+        """Fix #3: debounce a live preview refresh while the user types,
+        but only if the preview panel is already visible (never force it
+        open just because the user is typing)."""
+        if self.preview_box.isVisible():
+            self._preview_timer.start()
+
+    def _build_preview_text(self) -> str:
+        """Build the exact system prompt using whatever is currently typed
+        in the editor (whether or not it has been applied yet). Has no side
+        effects on the live translation state — the module-level active
+        override is restored immediately afterward."""
         from gui.ollama_worker import (
             TranslationRequest, get_prompt_overrides, set_prompt_overrides,
         )
@@ -298,15 +372,23 @@ class PromptEditorDialog(QDialog):
                 source_lang=getattr(self._settings, "default_source_lang", "en") or "en",
                 target_lang=getattr(self._settings, "default_target_lang", "ko") or "ko",
             )
-            prompt_text = sample_req.to_system_prompt()
+            return sample_req.to_system_prompt()
         except Exception as exc:
             logger.error("Prompt preview failed: %s", exc)
-            prompt_text = self.tr("[Preview failed: {err}]").format(err=exc)
+            return self.tr("[Preview failed: {err}]").format(err=exc)
         finally:
             set_prompt_overrides(prev_persona, prev_rules)  # never leaks into live state
 
-        self.preview_box.setPlainText(prompt_text)
+    def _on_preview(self) -> None:
+        """Show the preview panel and populate it (Fix #3: subsequent edits
+        auto-refresh it via _on_text_changed, no need to click again)."""
+        self.preview_box.setPlainText(self._build_preview_text())
         self.preview_box.setVisible(True)
+        self._preview_hint_label.setVisible(True)
+
+    def _refresh_preview_if_visible(self) -> None:
+        if self.preview_box.isVisible():
+            self.preview_box.setPlainText(self._build_preview_text())
 
     # ── apply / accept / reject ──────────────────────────────────────────────
     def _do_apply(self) -> None:
@@ -316,6 +398,12 @@ class PromptEditorDialog(QDialog):
 
         self._settings.prompt_persona = self.persona_edit.toPlainText().strip()
         self._settings.prompt_custom_rules = self.rules_edit.toPlainText().strip()
+        # Fix #1: remember which preset (if any) is now active so the dialog
+        # reopens with the right combo selection next time.
+        current_preset = self.combo_preset.currentText()
+        self._settings.prompt_active_preset = (
+            "" if current_preset == BUILTIN_DEFAULT_LABEL else current_preset
+        )
         set_prompt_overrides(
             self._settings.prompt_persona, self._settings.prompt_custom_rules
         )

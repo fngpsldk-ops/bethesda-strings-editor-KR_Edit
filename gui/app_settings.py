@@ -79,6 +79,10 @@ class AppSettings:
     prompt_custom_rules: str = ""
     # Named presets: {"이름": {"persona": "...", "custom_rules": "..."}}
     prompt_presets: dict = field(default_factory=dict)
+    # Name of the preset currently applied (empty = BSEK default, not a saved
+    # preset). Lets the Prompt Editor reopen with the right combo selection
+    # instead of always resetting to "BSEK 기본값".
+    prompt_active_preset: str = ""
 
     # ── Ollama ───────────────────────────────────────────────────
     ollama_url: str = "http://localhost:11434"
