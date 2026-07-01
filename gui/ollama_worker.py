@@ -667,39 +667,41 @@ class TranslationRequest:
             return fix_base
 
         persona_text = _active_persona or DEFAULT_PERSONA
-        intro = (
-            f"{persona_text}\n"
-            f"{src_name} 텍스트를 자연스럽고 세련된 {tgt_name}로 번역하세요. "
-            f"번역문만 출력하세요 — 머리말, 참고사항, 코멘트 없이.\n\n"
-        )
 
         # BSEK: when the user has written Additional Rules text in the Prompt
-        # Editor, it REPLACES the entire built-in Starfield-specific rule set
-        # below (game-tag preservation, bracket-token categories, etc.) rather
-        # than being appended after it. This is deliberate: it lets BSEK be
-        # repurposed for other Bethesda games (Skyrim, Fallout, ...) by writing
-        # an entirely new rule set from scratch, instead of being permanently
-        # stuck with Starfield-only rules. The Prompt Editor has a "Copy Base
-        # Rules" button so the Starfield rules can be copied into the editor
-        # first and edited/extended, rather than rewritten from nothing.
+        # Editor, it REPLACES not just the built-in Starfield-specific rule set
+        # (game-tag preservation, bracket-token categories, etc.) but also the
+        # fixed "translate {src} to {tgt}" instruction sentence and the built-in
+        # Starfield example translations (New Atlantis, the Key, ...) below.
+        # This is deliberate: it lets BSEK be repurposed for other Bethesda
+        # games (Skyrim, Fallout, ...) or other language pairs by writing an
+        # entirely self-contained prompt from scratch, instead of being
+        # permanently stuck with Starfield-only, en->ko-only fixed text. The
+        # Prompt Editor has a "Copy Base Rules" button so the Starfield rules
+        # can be copied into the editor first and edited/extended, rather than
+        # rewritten from nothing.
         if _active_custom_rules:
-            rules_block = _active_custom_rules.rstrip("\n") + "\n"
+            base = f"{persona_text}\n" + _active_custom_rules.rstrip("\n") + "\n"
         else:
+            intro = (
+                f"{persona_text}\n"
+                f"{src_name} 텍스트를 자연스럽고 세련된 {tgt_name}로 번역하세요. "
+                f"번역문만 출력하세요 — 머리말, 참고사항, 코멘트 없이.\n\n"
+            )
             rules_block = default_rules_block(self.target_lang)
+            base = intro + rules_block
 
-        base = intro + rules_block
+            # Source-language note (e.g. Russian needs a "don't transliterate" reminder).
+            src_extra = _SOURCE_EXTRA.get(self.source_lang, "")
+            pair_extra = _PAIR_EXTRA.get((self.source_lang, self.target_lang), "")
+            note = " ".join(filter(None, [src_extra, pair_extra]))
+            if note:
+                base += f"\nNote: {note}\n"
 
-        # Source-language note (e.g. Russian needs a "don't transliterate" reminder).
-        src_extra = _SOURCE_EXTRA.get(self.source_lang, "")
-        pair_extra = _PAIR_EXTRA.get((self.source_lang, self.target_lang), "")
-        note = " ".join(filter(None, [src_extra, pair_extra]))
-        if note:
-            base += f"\nNote: {note}\n"
-
-        # Translation examples (if we have a specific pair or a generic one).
-        examples = _LANG_EXAMPLES.get((self.source_lang, self.target_lang), "")
-        if examples:
-            base += f"\nExamples:\n{examples}"
+            # Translation examples (if we have a specific pair or a generic one).
+            examples = _LANG_EXAMPLES.get((self.source_lang, self.target_lang), "")
+            if examples:
+                base += f"\nExamples:\n{examples}"
 
         result = base
         if self.context_note:
