@@ -299,53 +299,23 @@ class _WelcomeWidget(QWidget):
         QTimer.singleShot(400, lambda: start_card_pulse(card))
 
     def load_changelog(self) -> None:
-        """Fetch recent GitHub releases and show them in the What's New panel.
+        """Show the What's New panel with a static BSEK changelog entry.
 
-        Non-blocking (runs in a QThread); silently does nothing on network
-        failure beyond leaving a link to the releases page.  Called once at
-        startup when update checks are enabled.
+        BSEK note: this used to fetch release notes live from GitHub — but
+        it was pointed at the ORIGINAL upstream project's releases
+        (0xra0/bethesda-strings-editor), not this fork, so it was showing
+        unrelated changes (and the update-checker could have prompted an
+        "update" that would silently replace this fork's Korean/Gemini/
+        Prompt-Editor work with vanilla upstream). Now hardcoded to this
+        fork's own v1.0.0_KR changelog instead of a live network fetch.
         """
-        if self._changelog_fetcher is not None:
-            return
-        from gui.updater import ChangelogFetcher
+        from gui.updater import RELEASES_URL
 
         self._changelog_panel.setVisible(True)
-        self._changelog_view.setHtml(
-            f"<p style='color:gray'>{self.tr('Loading changelog…')}</p>"
-        )
-        fetcher = ChangelogFetcher(limit=6, parent=self)
-        fetcher.loaded.connect(self._on_changelog_loaded)
-        fetcher.failed.connect(self._on_changelog_failed)
-        fetcher.finished.connect(fetcher.deleteLater)
-        self._changelog_fetcher = fetcher
-        fetcher.start()
-
-    @Slot(list)
-    def _on_changelog_loaded(self, releases: list) -> None:
-        from gui.updater import RELEASES_URL, changelog_to_html
-
-        try:
-            from _version import __version__ as current
-        except Exception:
-            current = ""
-        if not releases:
-            self._changelog_panel.setVisible(False)
-            return
-        self._changelog_panel.setVisible(True)
-        self._changelog_view.setHtml(changelog_to_html(releases, current))
+        self._changelog_view.setHtml(_BSEK_CHANGELOG_HTML)
         self._changelog_view.verticalScrollBar().setValue(0)
         self._changelog_footer.setText(
             f"<a href='{RELEASES_URL}'>{self.tr('All releases on GitHub →')}</a>"
-        )
-
-    @Slot(str)
-    def _on_changelog_failed(self, _msg: str) -> None:
-        from gui.updater import RELEASES_URL
-
-        # Don't nag — collapse to a single quiet link to the releases page.
-        self._changelog_view.setHtml(
-            f"<p style='color:gray'>{self.tr('Could not load the changelog.')} "
-            f"<a href='{RELEASES_URL}'>{self.tr('Open releases on GitHub')}</a></p>"
         )
 
     def dragEnterEvent(self, event):
@@ -487,6 +457,38 @@ class _DropOverlay(QWidget):
                 f"color:{color}; background:transparent;"
             )
         self._icon_lbl.setText(icon)
+
+
+# ── BSEK: static "What's New" content for this fork ─────────────────────────
+# Replaces the original live GitHub-fetch changelog (which pointed at the
+# upstream 0xra0/bethesda-strings-editor project, not this fork). Update this
+# by hand when a new BSEK release is tagged.
+_BSEK_CHANGELOG_HTML = """
+<h3 style="margin:0 0 6px 0;">v1.0.0_KR &middot; 2026-07-02</h3>
+<p style="margin:0 0 10px 0; opacity:0.75;">
+BSEK (Bethesda Strings Editor &mdash; Korean Edition)&nbsp;&mdash;
+0xra0/bethesda-strings-editor의 포크로, Starfield 영&rarr;한 로컬라이제이션에 맞춰
+개조되었습니다.
+</p>
+<ul style="margin:0 0 10px 18px; padding:0;">
+  <li><b>클라우드 AI 번역 백엔드</b> &mdash; Gemini / ChatGPT 등 OpenAI 호환 API를
+      GUI 안에서 직접 선택·설정 (Settings &gt; Translation Backend). 별도 프록시
+      서버 불필요.</li>
+  <li><b>프롬프트 에디터</b> &mdash; 번역 프롬프트의 정체성(페르소나)과 규칙을
+      GUI에서 직접 편집. 프리셋 저장/불러오기, 실시간 미리보기 지원. 다른
+      Bethesda 게임(Skyrim, Fallout 등)으로 재활용할 수 있도록 기본 규칙 전체
+      교체도 가능.</li>
+  <li><b>한국어 지원</b> &mdash; 언어 목록을 English/Japanese/Korean으로 정리
+      (일본어는 존댓말·반말 참고용으로 유지), 기본 번역 방향 English&rarr;Korean,
+      메뉴 UI 한글화(1,589개 항목).</li>
+  <li><b>번역 품질 튜닝</b> &mdash; 팀 왈도 한글 패치 용어집(2,067개) 연동,
+      퀘스트 목표 명령형 어투·반말/존댓말 맥락 판단 규칙 추가.</li>
+  <li><b>안정성/버그 수정</b> &mdash; GPU 모니터 프리징, Windows Python 3.10
+      크래시, Settings 저장 시 앱 종료, 다크 테마 저대비(가독성) 문제 등 다수
+      수정.</li>
+  <li><b>실행 편의성</b> &mdash; 더블클릭 실행용 bat 런처 추가.</li>
+</ul>
+"""
 
 
 class MainWindow(QMainWindow):
@@ -7135,8 +7137,8 @@ class MainWindow(QMainWindow):
             f"<p style='margin:0'>Built with <b>Python {sys.version.split()[0]}</b>"
             f" · <b>PySide6 {pyside_version}</b></p>"
             f"<p style='margin:4px 0 0 0'>"
-            f"<a href='https://github.com/0xra0/bethesda-strings-editor' style='color:#4a9eff'>"
-            f"github.com/0xra0/bethesda-strings-editor</a></p>"
+            f"<a href='https://github.com/fngpsldk-ops/bethesda-strings-editor-KR_Edit' style='color:#4a9eff'>"
+            f"github.com/fngpsldk-ops/bethesda-strings-editor-KR_Edit</a></p>"
         )
         tech.setTextFormat(Qt.TextFormat.RichText)
         tech.setOpenExternalLinks(True)

@@ -20,9 +20,9 @@ from PySide6.QtCore import QThread, Signal
 
 logger = logging.getLogger(__name__)
 
-GITHUB_API   = "https://api.github.com/repos/0xra0/bethesda-strings-editor/releases/latest"
-RELEASES_API = "https://api.github.com/repos/0xra0/bethesda-strings-editor/releases"
-RELEASES_URL = "https://github.com/0xra0/bethesda-strings-editor/releases"
+GITHUB_API   = "https://api.github.com/repos/fngpsldk-ops/bethesda-strings-editor-KR_Edit/releases/latest"
+RELEASES_API = "https://api.github.com/repos/fngpsldk-ops/bethesda-strings-editor-KR_Edit/releases"
+RELEASES_URL = "https://github.com/fngpsldk-ops/bethesda-strings-editor-KR_Edit/releases"
 
 _API_HEADERS = {
     "Accept": "application/vnd.github+json",
@@ -31,13 +31,15 @@ _API_HEADERS = {
 
 
 def parse_version(s: str) -> tuple[int, ...]:
-    """'v0.2.3' → (0, 2, 3).  Non-numeric parts become 0."""
+    """'v0.2.3' → (0, 2, 3).  'v1.0.1_KR' → (1, 0, 1) — leading digits of
+    each dot-separated part are used; a trailing non-numeric suffix (like
+    BSEK's "_KR" tag) is ignored rather than zeroing the whole part out.
+    Fully non-numeric parts (no leading digits at all) become 0.
+    """
     parts = []
     for p in s.strip().lstrip("v").split("."):
-        try:
-            parts.append(int(p))
-        except ValueError:
-            parts.append(0)
+        match = re.match(r"\d+", p)
+        parts.append(int(match.group()) if match else 0)
     return tuple(parts)
 
 
