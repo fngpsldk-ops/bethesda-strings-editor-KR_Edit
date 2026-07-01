@@ -272,11 +272,16 @@ class PromptEditorDialog(QDialog):
         if not name or name == BUILTIN_DEFAULT_LABEL:
             self.persona_edit.setPlainText("")
             self.rules_edit.setPlainText("")
-            return
-        entry = get_preset(self._settings, name)
-        if entry is not None:
-            self.persona_edit.setPlainText(entry["persona"])
-            self.rules_edit.setPlainText(entry["custom_rules"])
+        else:
+            entry = get_preset(self._settings, name)
+            if entry is not None:
+                self.persona_edit.setPlainText(entry["persona"])
+                self.rules_edit.setPlainText(entry["custom_rules"])
+        # Refresh the preview immediately (not via the debounced textChanged
+        # path) so switching presets never leaves stale content behind while
+        # waiting for the debounce timer.
+        self._preview_timer.stop()
+        self._refresh_preview_if_visible()
 
     def _on_save(self) -> None:
         """Fix #2: overwrite the currently selected preset with the editor's
@@ -387,11 +392,18 @@ class PromptEditorDialog(QDialog):
             set_prompt_overrides(prev_persona, prev_rules)  # never leaks into live state
 
     def _on_preview(self) -> None:
-        """Show the preview panel and populate it (Fix #3: subsequent edits
-        auto-refresh it via _on_text_changed, no need to click again)."""
+        """Toggle the preview panel. Clicking while it's open closes it;
+        clicking while it's closed opens it and populates it. There was
+        previously no way to close the preview once opened."""
+        if self.preview_box.isVisible():
+            self.preview_box.setVisible(False)
+            self._preview_hint_label.setVisible(False)
+            self.btn_preview.setText(self.tr("Preview Full Prompt"))
+            return
         self.preview_box.setPlainText(self._build_preview_text())
         self.preview_box.setVisible(True)
         self._preview_hint_label.setVisible(True)
+        self.btn_preview.setText(self.tr("Hide Preview"))
 
     def _refresh_preview_if_visible(self) -> None:
         if self.preview_box.isVisible():
