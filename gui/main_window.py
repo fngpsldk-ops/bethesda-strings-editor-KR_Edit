@@ -1417,6 +1417,18 @@ class MainWindow(QMainWindow):
         self.version_compare_action.triggered.connect(self._compare_game_versions)
         trans_menu.addAction(self.version_compare_action)
 
+        trans_menu.addSeparator()
+
+        self.prompt_editor_action = QAction(self.tr("&Prompt Editor…"), self)
+        self.prompt_editor_action.setIcon(QIcon.fromTheme("accessories-text-editor"))
+        self.prompt_editor_action.setToolTip(self.tr(
+            "Edit the translation prompt's persona and style rules, and save/load\n"
+            "named presets. Safety-critical rules (game tag preservation, glossary\n"
+            "enforcement) are not editable here and always remain in effect."
+        ))
+        self.prompt_editor_action.triggered.connect(self._open_prompt_editor)
+        trans_menu.addAction(self.prompt_editor_action)
+
         self.batch_compare_action = QAction(
             self.tr("Batch Compare Game &Folders…"), self
         )
@@ -5328,6 +5340,25 @@ class MainWindow(QMainWindow):
 
             # Update UI to reflect new settings
             self._update_ui_state()
+
+    @Slot()
+    def _open_prompt_editor(self):
+        """Open the Prompt Editor dialog (Translation menu)."""
+        from gui.prompt_editor_dialog import PromptEditorDialog
+
+        dialog = PromptEditorDialog(
+            self.settings, self, theme_manager=self.theme_manager
+        )
+        dialog.applied.connect(
+            lambda: self.statusBar().showMessage(
+                self.tr("Prompt updated — new translations will use it immediately."),
+                4000,
+            )
+        )
+        dialog.exec()
+        # PromptEditorDialog persists to disk itself (see _do_apply), so no
+        # further action is needed here regardless of Accepted/Rejected —
+        # Cancel simply means no Apply/OK was ever clicked during this session.
 
     def closeEvent(self, event):
         """Cleanup on window close."""
