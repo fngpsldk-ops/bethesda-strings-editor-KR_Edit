@@ -1000,7 +1000,7 @@ class MainWindow(QMainWindow):
         self.spin_quality.setRange(AppSettings._QUALITY_MIN, AppSettings._QUALITY_MAX)
         self.spin_quality.setValue(self.settings.quality_level)
         self.spin_quality.setSuffix("/10")
-        self.spin_quality.setFixedWidth(72)
+        self.spin_quality.setFixedWidth(85)
         self.spin_quality.setToolTip(
             self.tr("Quality 7-10 recommended")
         )
