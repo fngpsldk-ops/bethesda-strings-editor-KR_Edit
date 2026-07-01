@@ -256,9 +256,18 @@ class OpenAICompatWorker(QObject):
                 return req.index, None, req.string_id
 
             # Restore protected terms
+            # BSEK bug fix: this called the nonexistent method `restore()`
+            # (TermProtector only defines `restore_text()`), so every restore
+            # attempt silently raised AttributeError and was swallowed by the
+            # except clause below — protected terms (game tags, printf specifiers,
+            # <Alias=...> tags, [BRACKET_ID] codes) were NEVER restored, which is
+            # why they showed up corrupted/empty ([]) in translated output.
+            # protected_text=protected (the placeholder-substituted source) enables
+            # restore_text()'s anchor-based template matching for exact whitespace
+            # and paragraph preservation, matching how ollama_worker.py calls it.
             if token_map and self.term_protector:
                 try:
-                    result = self.term_protector.restore(result, token_map)
+                    result = self.term_protector.restore_text(result, token_map, protected)
                 except Exception as exc:
                     logger.warning("Term restore failed: %s", exc)
 

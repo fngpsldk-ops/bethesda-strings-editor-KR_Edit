@@ -223,9 +223,12 @@ class ClaudeTranslationWorker(QObject):
                 return req.index, None, req.string_id
 
             # Restore protected terms
+            # BSEK bug fix: same nonexistent-method bug as openai_compat_worker.py
+            # — `restore()` does not exist on TermProtector (only `restore_text()`),
+            # so restoration silently failed via AttributeError every time.
             if token_map and self.term_protector:
                 try:
-                    result = self.term_protector.restore(result, token_map)
+                    result = self.term_protector.restore_text(result, token_map, protected)
                 except Exception as exc:
                     logger.warning("Term restore failed: %s", exc)
 

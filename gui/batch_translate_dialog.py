@@ -441,9 +441,12 @@ class BatchTranslateWorker(QThread):
                     return row_idx, None, "empty"
 
                 # Restore protected terms
+                # BSEK bug fix: same nonexistent-method bug as the other workers
+                # — `restore()` does not exist on TermProtector (only
+                # `restore_text()`), so restoration silently failed every time.
                 if token_map and term_protector:
                     try:
-                        result = term_protector.restore(result, token_map)
+                        result = term_protector.restore_text(result, token_map, protected)
                     except Exception:
                         pass
 
