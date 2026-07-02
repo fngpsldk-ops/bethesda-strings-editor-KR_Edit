@@ -98,6 +98,14 @@ _FIELD_DEFS: list[tuple[str, str, int, bool, int]] = [
     ("EPF2", "PERK", 0, False, 0),  # Perk entry-point button label (EPFT=4)
     ("LNAM", "INGR", 0, False, 0),  # Ingredient plural name
     ("SHRT", "INGR", 0, False, 0),  # Ingredient short name
+    # GPOF (GameplayOption Form) — Starfield's native Settings > Gameplay
+    # menu integration. NNAM/DNAM/VOVS/RESN are player-visible text; the
+    # remaining fields (TNAM/VNAM/WNAM/VORV/VORN/GPOD) are numeric option
+    # data and must not be touched.
+    ("NNAM", "GPOF", 0, False, 0),  # Setting title
+    ("DNAM", "GPOF", 0, False, 0),  # Setting description (top paragraph)
+    ("VOVS", "GPOF", 0, False, 0),  # Per-option description ("{0}: ...")
+    ("RESN", "GPOF", 0, False, 0),  # Per-option label (ENABLED/DISABLED/…)
 ]
 
 # Fast lookup tables built at import time
