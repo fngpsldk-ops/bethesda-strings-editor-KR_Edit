@@ -350,10 +350,18 @@ class StringTableModel(QAbstractTableModel):
         self.set_pre_est_data(result)
 
     def set_translated_text(self, row_index: int, text: str):
-        """Set translated text for a single row."""
+        """Set translated text for a single row.
+
+        BSEK bug fix: this used to unconditionally set status="translated"
+        even when text is empty (e.g. cleared via the Delete key). An empty
+        translation is not a translated string — it must revert to "pending"
+        so it correctly reappears in untranslated filters / gets picked up
+        by the next Translate All batch, instead of silently staying marked
+        done while showing blank text.
+        """
         if 0 <= row_index < len(self._data):
             self._data[row_index]["translated"] = text
-            self._data[row_index]["status"] = "translated"
+            self._data[row_index]["status"] = "translated" if text else "pending"
             trans_idx = self.index(row_index, self.COLUMNS.index("Translated"))
             status_idx = self.index(row_index, self.COLUMNS.index("Status"))
             self.dataChanged.emit(trans_idx, trans_idx, [Qt.DisplayRole, Qt.ForegroundRole])
@@ -865,6 +873,11 @@ class StringTableView(QTableView):
         ctrl  = Qt.KeyboardModifier.ControlModifier
         shift = Qt.KeyboardModifier.ShiftModifier
 
+        # ── Delete key: clear Translated cell content for selected rows ─────
+        if mods == Qt.KeyboardModifier.NoModifier and key == Qt.Key.Key_Delete:
+            self._clear_translated()
+            return
+
         # ── Copy / Paste shortcuts ──────────────────────────────────────────
         if mods == ctrl:
             if key == Qt.Key.Key_C:
@@ -977,6 +990,22 @@ class StringTableView(QTableView):
         for i, row in enumerate(rows):
             cell_text = lines[i] if len(lines) == len(rows) else text
             sm.setData(sm.index(row, col), cell_text)
+
+    def _clear_translated(self) -> None:
+        """Clear the Translated cell content for all selected rows (Delete key).
+
+        Mirrors _fill_translated_from_source()'s selection/setData pattern.
+        Always targets the Translated column regardless of which column is
+        focused, matching the existing Ctrl+C/Ctrl+V shortcuts in this same
+        keyPressEvent block, which likewise always target Translated.
+        """
+        sm = self._source_model()
+        if sm is None or not hasattr(sm, "COLUMNS"):
+            return
+        col = sm.COLUMNS.index("Translated")
+        rows = self._selected_source_rows()
+        for row in rows:
+            sm.setData(sm.index(row, col), "")
 
     def _fill_translated_from_source(self) -> None:
         """Copy each selected row's Original text into its Translated cell."""
