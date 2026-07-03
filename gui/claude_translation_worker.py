@@ -99,6 +99,11 @@ class ClaudeTranslationWorker(QObject):
         self.profile_manager = None     # bethesda_strings.character_profiles.ProfileManager (optional)
         self.profile_assignments = None # bethesda_strings.character_profiles.ProfileAssignments (optional)
         self.skipped_types: list = []
+        # TM fuzzy-match tolerance — mirrors OllamaWorker.tm_fuzzy_max_score.
+        # Overwritten from settings by main_window the same way as the Ollama
+        # worker (self.ollama_worker.tm_fuzzy_max_score = ...), since that
+        # attribute name is shared across both worker classes.
+        self.tm_fuzzy_max_score: float = 3.0
 
         self._stop_flag = False
         self._mutex = QMutex()
@@ -162,10 +167,18 @@ class ClaudeTranslationWorker(QObject):
                 if cached:
                     return req.index, cached, req.string_id
 
-            # Check translation memory
+            # Check translation memory — exact ID hit, then exact source-text
+            # hit, then fuzzy match. Mirrors OllamaWorker's cascade; TranslationMemory
+            # has no .get() method, only get_by_id/get_by_source/get_fuzzy.
             if hasattr(self, "translation_memory") and self.translation_memory:
-                tm_result = self.translation_memory.get(req.string_id)
-                if tm_result:
+                tm_result = self.translation_memory.get_by_id(req.string_id)
+                if tm_result is None:
+                    tm_result = self.translation_memory.get_by_source(source_text)
+                if tm_result is None:
+                    tm_result = self.translation_memory.get_fuzzy(
+                        source_text, max_score=self.tm_fuzzy_max_score
+                    )
+                if tm_result is not None:
                     return req.index, tm_result, req.string_id
 
             # Term protection

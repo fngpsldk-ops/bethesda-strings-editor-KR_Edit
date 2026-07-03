@@ -84,6 +84,8 @@ class OpenAICompatWorker(QObject):
         self.profile_manager = None
         self.profile_assignments = None
         self.skipped_types: list = []
+        self.translation_memory = None  # gui.translation_memory.TranslationMemory (optional)
+        self.tm_fuzzy_max_score: float = 3.0  # mirrors OllamaWorker.tm_fuzzy_max_score
 
         self._stop_flag = False
         self._mutex = QMutex()
@@ -200,6 +202,23 @@ class OpenAICompatWorker(QObject):
                         return req.index, None, req.string_id
                 except Exception:
                     pass
+
+            # Translation memory — exact ID hit, then exact source-text hit,
+            # then fuzzy match. Same cascade as OllamaWorker / ClaudeTranslationWorker.
+            # Checked before the cache so a freshly-loaded reference translation
+            # (e.g. converted from an existing community 한글패치) always wins,
+            # even if a stale/worse cached entry exists for this text.
+            is_retry = bool(req.retry_hint) or bool(req.fix_translation)
+            if not is_retry and self.translation_memory:
+                tm_result = self.translation_memory.get_by_id(req.string_id)
+                if tm_result is None:
+                    tm_result = self.translation_memory.get_by_source(source_text)
+                if tm_result is None:
+                    tm_result = self.translation_memory.get_fuzzy(
+                        source_text, max_score=self.tm_fuzzy_max_score
+                    )
+                if tm_result is not None:
+                    return req.index, tm_result, req.string_id
 
             # Cache lookup
             cache_key = None

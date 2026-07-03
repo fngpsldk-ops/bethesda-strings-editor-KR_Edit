@@ -106,6 +106,7 @@ _FIELD_DEFS: list[tuple[str, str, int, bool, int]] = [
     ("DNAM", "GPOF", 0, False, 0),  # Setting description (top paragraph)
     ("VOVS", "GPOF", 0, False, 0),  # Per-option description ("{0}: ...")
     ("RESN", "GPOF", 0, False, 0),  # Per-option label (ENABLED/DISABLED/…)
+    ("NNAM", "GPOG", 0, False, 0),  # GameplayOption Group — settings-menu category title
 ]
 
 # Fast lookup tables built at import time
