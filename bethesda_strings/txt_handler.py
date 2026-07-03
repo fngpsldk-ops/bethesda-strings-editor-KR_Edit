@@ -67,15 +67,22 @@ class TxtStringFile:
     # ------------------------------------------------------------------
 
     def load(self, path: Union[str, Path]) -> None:
-        """Parse a UTF-16 TXT file into entries."""
+        """Parse a UTF-16 TXT file from disk into entries."""
         path = Path(path)
-        try:
-            with open(path, "r", encoding="utf-16") as fh:
-                raw_lines = fh.readlines()
-        except UnicodeError:
-            with open(path, "r", encoding="utf-8") as fh:
-                raw_lines = fh.readlines()
+        with open(path, "rb") as fh:
+            data = fh.read()
+        self.load_from_bytes(data)
+        logger.info("Loaded %d strings from %s", len(self.strings), path.name)
 
+    def load_from_bytes(self, data: bytes) -> None:
+        """Parse TXT content already in memory (e.g. extracted from a BA2 archive)."""
+        try:
+            text = data.decode("utf-16")
+        except UnicodeError:
+            text = data.decode("utf-8", errors="replace")
+        self._parse_raw_lines(text.splitlines(keepends=True))
+
+    def _parse_raw_lines(self, raw_lines) -> None:
         self.strings.clear()
         self._lines.clear()
 
@@ -94,21 +101,23 @@ class TxtStringFile:
                 # Preserve blank lines / comment lines verbatim
                 self._lines.append(line)
 
-        logger.info("Loaded %d strings from %s", len(self.strings), path.name)
-
     def save(self, path: Union[str, Path]) -> None:
         """Write the file back to disk in UTF-16 LE format with BOM."""
         path = Path(path)
-        with open(path, "w", encoding="utf-16-le", newline="") as fh:
-            fh.write("﻿")  # BOM
-            for item in self._lines:
-                if isinstance(item, TxtStringEntry):
-                    fh.write(f"{item.key}\t{item.text}\r\n")
-                else:
-                    # Raw line — normalise line ending
-                    raw = item.rstrip("\r\n")
-                    fh.write(raw + "\r\n")
+        with open(path, "wb") as fh:
+            fh.write(self.to_bytes())
         logger.info("Saved %d strings to %s", len(self.strings), path.name)
+
+    def to_bytes(self) -> bytes:
+        """Serialize back to UTF-16 LE bytes with BOM (for BA2 repacking)."""
+        parts = ["﻿"]  # BOM
+        for item in self._lines:
+            if isinstance(item, TxtStringEntry):
+                parts.append(f"{item.key}\t{item.text}\r\n")
+            else:
+                raw = item.rstrip("\r\n")
+                parts.append(raw + "\r\n")
+        return "".join(parts).encode("utf-16-le")
 
     def __len__(self) -> int:
         return len(self.strings)

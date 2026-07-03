@@ -46,6 +46,12 @@ _GNRL_ENTRY_SIZE = struct.calcsize(_GNRL_ENTRY_FMT)  # 36
 
 _STRINGS_EXTS = frozenset({".strings", ".dlstrings", ".ilstrings"})
 
+# Starfield Scaleform (SWF) UI menus — including mod-added entries in the
+# vanilla Settings menu — pull their text from a separate localization
+# mechanism: plain TXT files under this directory, keyed by directory
+# rather than by plugin name (so it matches any mod regardless of name).
+_INTERFACE_TRANSLATIONS_DIR = "interface/translations/"
+
 
 @dataclass
 class _GnrlEntry:
@@ -90,6 +96,21 @@ class BA2File:
             n for n in self.list_files()
             if Path(n.replace("\\", "/")).suffix.lower() in _STRINGS_EXTS
         ]
+
+    def list_interface_txt_files(self) -> list[str]:
+        """Return internal paths under Interface/Translations/ ending in .txt.
+
+        These are Starfield's Scaleform (SWF) UI translation files — used by
+        mod-added Settings-menu entries and other in-game config screens —
+        which live outside the ESM and are keyed by the mod's translation
+        folder rather than a fixed plugin name, so this matches any mod.
+        """
+        out = []
+        for n in self.list_files():
+            norm = n.replace("\\", "/").lower()
+            if norm.endswith(".txt") and _INTERFACE_TRANSLATIONS_DIR in norm:
+                out.append(n)
+        return out
 
     def extract(self, name: str) -> bytes:
         """Return the decompressed bytes for *name*."""
