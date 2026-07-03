@@ -261,6 +261,15 @@ class EspFile:
         pos = 0
         start_idx = len(self.strings)  # track entries added by this record
         context_note = ""
+        # GPOF (GameplayOption Form) has no NLDT field to carry context, unlike
+        # AVIF. Its RESN/VOVS entries are terse mode-option labels ("STREAMLINED",
+        # "ENABLED"...) that are ambiguous in isolation (e.g. "STREAMLINED" reads
+        # as an aerodynamic adjective without knowing it's a settings-menu mode
+        # name). Capture the record's own NNAM (group title) + DNAM (description)
+        # as we walk the fields below and synthesize a context_note from them,
+        # reusing the same attach-after-loop mechanism as NLDT.
+        gpof_nnam = ""
+        gpof_dnam = ""
 
         while pos < len(body):
             if pos + 6 > len(body):
@@ -296,6 +305,21 @@ class EspFile:
                     except Exception:
                         context_note = raw.decode("latin-1", errors="replace")
                 continue
+
+            if rec_str == "GPOF" and fsig in (b"NNAM", b"DNAM") and fdata:
+                raw2 = fdata.rstrip(b"\x00")
+                if raw2:
+                    try:
+                        txt = raw2.decode(encoding, errors="replace")
+                    except Exception:
+                        txt = raw2.decode("latin-1", errors="replace")
+                    if fsig == b"NNAM":
+                        gpof_nnam = txt
+                    else:
+                        gpof_dnam = txt
+                # Deliberately no `continue` — fall through to the generic
+                # dispatch below so NNAM/DNAM are still added to self.strings
+                # as normal translatable entries.
 
             fsig_str = fsig.decode("ascii", errors="replace")
             result = _field_list_index(fsig_str, rec_str)
@@ -334,6 +358,16 @@ class EspFile:
                 list_index=list_index, string_id=0,
                 original=text, _raw=bytes(fdata),
             ))
+
+        # Synthesize a context_note for GPOF from its own NNAM/DNAM, since it
+        # has no NLDT field to carry one natively (see comment above).
+        if rec_str == "GPOF" and not context_note and (gpof_nnam or gpof_dnam):
+            parts = []
+            if gpof_nnam:
+                parts.append(f'Settings-menu option group: "{gpof_nnam}"')
+            if gpof_dnam:
+                parts.append(f"Group description: {gpof_dnam}")
+            context_note = " ".join(parts)
 
         # Attach NLDT context note to all entries added by this record
         if context_note:
