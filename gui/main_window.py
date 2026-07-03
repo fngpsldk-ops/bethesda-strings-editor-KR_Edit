@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from PySide6.QtCore import (
     QItemSelectionModel,
@@ -609,6 +609,13 @@ class MainWindow(QMainWindow):
             from gui.glossary import GlossaryManager
             self._glossary_manager = GlossaryManager(get_config_dir())
 
+        # Translation memory — persisted on self (like the managers below) so
+        # it survives _init_translation_worker() rebuilding self.ollama_worker
+        # from scratch (settings apply, backend switch, ...). Previously this
+        # was only ever set on the ephemeral worker object directly, so any
+        # settings change silently dropped a loaded TM with no error.
+        self._translation_memory = None
+
         # Lore RAG manager
         self._lore_rag_manager = None
         self._lore_db = None
@@ -836,6 +843,8 @@ class MainWindow(QMainWindow):
             self.ollama_worker.profile_manager = self._profile_manager
             self.ollama_worker.profile_assignments = self._profile_assignments
             self.ollama_worker.skipped_types = list(self.settings.skip_string_types)
+            self.ollama_worker.translation_memory = self._translation_memory
+            self.ollama_worker.tm_fuzzy_max_score = self.settings.tm_fuzzy_max_score
             logger.info("Translation worker initialized (OpenAI-compat: %s @ %s)", oc_model, oc_url)
             self._active_backend_type = "openai_compat"
         elif is_claude_model(model):
@@ -857,6 +866,8 @@ class MainWindow(QMainWindow):
             self.ollama_worker.profile_manager = self._profile_manager
             self.ollama_worker.profile_assignments = self._profile_assignments
             self.ollama_worker.skipped_types = list(self.settings.skip_string_types)
+            self.ollama_worker.translation_memory = self._translation_memory
+            self.ollama_worker.tm_fuzzy_max_score = self.settings.tm_fuzzy_max_score
             logger.info("Translation worker initialized (Claude: %s)", model)
             self._active_backend_type = "claude"
         else:
@@ -879,6 +890,7 @@ class MainWindow(QMainWindow):
             self.ollama_worker.profile_manager = self._profile_manager
             self.ollama_worker.profile_assignments = self._profile_assignments
             self.ollama_worker.skipped_types = list(self.settings.skip_string_types)
+            self.ollama_worker.translation_memory = self._translation_memory
             self.ollama_worker.tm_fuzzy_max_score = self.settings.tm_fuzzy_max_score
             logger.info("Translation worker initialized (Ollama: %s)", model)
 
@@ -2672,6 +2684,8 @@ class MainWindow(QMainWindow):
             )
             ba2 = BA2File(file_path)
             strings_files = ba2.list_strings_files()
+            txt_files = ba2.list_interface_txt_files()
+            translatable_files = strings_files + txt_files
         except Exception as e:
             logger.error("Failed to open BA2 %s: %s", file_path, e, exc_info=True)
             QMessageBox.critical(
@@ -2681,21 +2695,22 @@ class MainWindow(QMainWindow):
             )
             return
 
-        if not strings_files:
+        if not translatable_files:
             ba2.close()
             QMessageBox.information(
                 self,
                 self.tr("No Strings Found"),
                 self.tr(
-                    "{name} does not contain any .strings / .dlstrings / .ilstrings files."
+                    "{name} does not contain any .strings / .dlstrings / "
+                    ".ilstrings files, or Interface\\Translations\\*.txt files."
                 ).format(name=p.name),
             )
             return
 
-        if len(strings_files) == 1:
-            entry_name = strings_files[0]
+        if len(translatable_files) == 1:
+            entry_name = translatable_files[0]
         else:
-            dlg = BA2PickerDialog(p.name, strings_files, parent=self)
+            dlg = BA2PickerDialog(p.name, translatable_files, parent=self)
             if dlg.exec() != BA2PickerDialog.DialogCode.Accepted:
                 ba2.close()
                 return
@@ -2706,8 +2721,12 @@ class MainWindow(QMainWindow):
 
         try:
             raw = ba2.extract(entry_name)
-            ext = Path(entry_name.replace("\\", "/")).suffix.lstrip(".")
-            string_file = BethesdaStringFile(file_extension=ext, buffer=raw)
+            ext = Path(entry_name.replace("\\", "/")).suffix.lstrip(".").lower()
+            if ext == "txt":
+                string_file: Union[BethesdaStringFile, TxtStringFile] = TxtStringFile()
+                string_file.load_from_bytes(raw)
+            else:
+                string_file = BethesdaStringFile(file_extension=ext, buffer=raw)
         except Exception as e:
             logger.error("Failed to extract %s from %s: %s", entry_name, p.name, e, exc_info=True)
             ba2.close()
@@ -2727,13 +2746,19 @@ class MainWindow(QMainWindow):
 
         entry_display = Path(entry_name.replace("\\", "/")).name
         self.lbl_file_info.setText(f"📦 {p.name}  /  {entry_display}")
-        self._update_encoding_label()
+        if isinstance(string_file, TxtStringFile):
+            self.lbl_encoding.setText(self.tr("Encoding: utf-16"))
+        else:
+            self._update_encoding_label()
         self.lbl_string_count.setText(
             self.tr("Strings: {count}").format(count=len(string_file))
         )
 
-        target_lang = self.combo_target_lang.currentData()
-        self.table_model.load_from_bethesda_file(string_file, locale=target_lang)
+        if isinstance(string_file, TxtStringFile):
+            self.table_model.load_from_txt_file(string_file)
+        else:
+            target_lang = self.combo_target_lang.currentData()
+            self.table_model.load_from_bethesda_file(string_file, locale=target_lang)
 
         self.file_loaded.emit(file_path)
         self._add_to_recent(file_path)
@@ -2757,7 +2782,26 @@ class MainWindow(QMainWindow):
             return self.save_file_as()
 
         try:
-            if isinstance(self.current_file, TxtStringFile):
+            if self._current_ba2 is not None:
+                # File was opened from inside a BA2 archive — repack rather
+                # than overwrite the .ba2 path with the raw entry content.
+                # Must be checked before the TxtStringFile/EspFile branches
+                # below, since Interface\Translations\*.txt entries are also
+                # TxtStringFile instances.
+                assert self._current_ba2_entry is not None
+                if isinstance(self.current_file, TxtStringFile):
+                    self.table_model.apply_changes_to_txt_file(self.current_file)
+                    raw = self.current_file.to_bytes()
+                else:
+                    assert isinstance(self.current_file, BethesdaStringFile)
+                    self.table_model.apply_changes_to_file(self.current_file)
+                    raw = self.current_file.get_bytes()
+                self._current_ba2.save_with_replacement(
+                    self.current_path,
+                    {self._current_ba2_entry: raw},
+                )
+                _count = len(self.current_file)
+            elif isinstance(self.current_file, TxtStringFile):
                 self.table_model.apply_changes_to_txt_file(self.current_file)
                 self.current_file.save(self.current_path)
                 _count = len(self.current_file)
@@ -2767,16 +2811,6 @@ class MainWindow(QMainWindow):
                 self.table_model.apply_changes_to_esp_file(self.current_file, encoding)
                 self.current_file.save(self.current_path, encoding)
                 _count = len(self.current_file.strings)
-            elif self._current_ba2 is not None:
-                assert isinstance(self.current_file, BethesdaStringFile)
-                assert self._current_ba2_entry is not None
-                self.table_model.apply_changes_to_file(self.current_file)
-                raw = self.current_file.get_bytes()
-                self._current_ba2.save_with_replacement(
-                    self.current_path,
-                    {self._current_ba2_entry: raw},
-                )
-                _count = len(self.current_file)
             else:
                 assert isinstance(self.current_file, BethesdaStringFile)
                 self.table_model.apply_changes_to_file(self.current_file)
@@ -2807,7 +2841,16 @@ class MainWindow(QMainWindow):
         is_esp = isinstance(self.current_file, EspFile)
         is_ba2 = self._current_ba2 is not None
 
-        if is_txt:
+        if is_ba2:
+            # Takes priority over is_txt: a TXT file opened from inside a
+            # BA2 (Interface\Translations\*.txt) must still be repacked
+            # into the archive, not saved as a loose .txt file.
+            default_name = (
+                f"{self.current_path.stem}_translated{self.current_path.suffix}"
+                if self.current_path else "output.ba2"
+            )
+            file_filter = self.tr("BA2 Archives (*.ba2 *.BA2);;All Files (*)")
+        elif is_txt:
             default_name = (
                 f"{self.current_path.stem}_uk.txt"
                 if self.current_path else "translate_uk.txt"
@@ -2819,12 +2862,6 @@ class MainWindow(QMainWindow):
                 if self.current_path else "output.esp"
             )
             file_filter = self.tr("Plugin Files (*.esp *.esm *.esl);;All Files (*)")
-        elif is_ba2:
-            default_name = (
-                f"{self.current_path.stem}_translated{self.current_path.suffix}"
-                if self.current_path else "output.ba2"
-            )
-            file_filter = self.tr("BA2 Archives (*.ba2 *.BA2);;All Files (*)")
         else:
             default_name = (
                 f"{self.current_path.stem}_translated{self.current_path.suffix}"
@@ -2844,7 +2881,22 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if is_txt:
+            if is_ba2:
+                assert self._current_ba2 is not None
+                assert self._current_ba2_entry is not None
+                if isinstance(self.current_file, TxtStringFile):
+                    self.table_model.apply_changes_to_txt_file(self.current_file)
+                    raw = self.current_file.to_bytes()
+                else:
+                    assert isinstance(self.current_file, BethesdaStringFile)
+                    self.table_model.apply_changes_to_file(self.current_file)
+                    raw = self.current_file.get_bytes()
+                self._current_ba2.save_with_replacement(
+                    file_path,
+                    {self._current_ba2_entry: raw},
+                )
+                _count2 = len(self.current_file)
+            elif is_txt:
                 assert isinstance(self.current_file, TxtStringFile)
                 self.table_model.apply_changes_to_txt_file(self.current_file)
                 self.current_file.save(file_path)
@@ -2856,17 +2908,6 @@ class MainWindow(QMainWindow):
                 self.table_model.apply_changes_to_esp_file(self.current_file, encoding)
                 self.current_file.save(Path(file_path), encoding)
                 _count2 = len(self.current_file.strings)
-            elif is_ba2:
-                assert isinstance(self.current_file, BethesdaStringFile)
-                assert self._current_ba2 is not None
-                assert self._current_ba2_entry is not None
-                self.table_model.apply_changes_to_file(self.current_file)
-                raw = self.current_file.get_bytes()
-                self._current_ba2.save_with_replacement(
-                    file_path,
-                    {self._current_ba2_entry: raw},
-                )
-                _count2 = len(self.current_file)
             else:
                 assert isinstance(self.current_file, BethesdaStringFile)
                 self.table_model.apply_changes_to_file(self.current_file)
@@ -5985,6 +6026,7 @@ class MainWindow(QMainWindow):
 
             if self.ollama_worker:
                 self.ollama_worker.translation_memory = memory
+            self._translation_memory = memory
 
             applied = 0
             if self.current_file is not None:
@@ -6083,6 +6125,7 @@ class MainWindow(QMainWindow):
     def _apply_nexus_tm(self, tm: TranslationMemory, label: str) -> None:
         if self.ollama_worker:
             self.ollama_worker.translation_memory = tm
+        self._translation_memory = tm
         applied = 0
         if self.current_file is not None:
             applied = self.table_model.import_translations(tm.as_id_dict())
