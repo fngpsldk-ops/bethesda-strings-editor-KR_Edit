@@ -216,6 +216,11 @@ def _substring_threshold_dec(length: int) -> int:
 
 # ── string proxy (ported from GetStringProxy in TESVT_Const.pas) ─────────────
 
+def _digit_sequences(text: str) -> list[str]:
+    """Extract every run of digits in *text*, in order (e.g. '28LY' -> ['28'])."""
+    return re.findall(r"\d+", text)
+
+
 def string_proxy(source: str, translation: str) -> int:
     """Return a 0-3 penalty for structural mismatches between source and translation.
 
@@ -270,6 +275,18 @@ def fuzzy_score(
     """
     src_lower = source.lower()
     cnd_lower = candidate.lower()
+
+    # Hard safety gate: numbers carry gameplay-critical values (ranges,
+    # quantities, thresholds, IDs...). Unlike xTranslator's original
+    # human-review workflow — where a fuzzy hit is a *suggestion* a
+    # translator checks before accepting — BSEK applies a fuzzy match as
+    # the final translation with no human in the loop. A sentence that's
+    # otherwise near-identical but has a DIFFERENT number ("28LY" vs
+    # "30LY") is NOT a safe reuse: silently shipping the old number would
+    # be a real in-game bug, not just an awkward phrasing. Reject outright
+    # (don't merely penalize) whenever the digit sequences differ.
+    if _digit_sequences(source) != _digit_sequences(candidate):
+        return None
 
     # ── fast-path: identical (same hash in Pascal) ─────────────────────────
     if src_lower == cnd_lower:
