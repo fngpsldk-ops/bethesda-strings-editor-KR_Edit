@@ -187,11 +187,17 @@ class TranslationMemory:
 
         if src_wc <= 1:
             # Single-word queries use fuzzy_score()'s separate substring-match
-            # path, which this word-sharing index isn't built around. Single-
-            # word entries are normally a small slice of a real TM, so a full
-            # scan here stays fast.
-            result = best_fuzzy_match(original, self._by_src.items(), max_score=max_score)
-            return result[0] if result else None
+            # path. That path is especially dangerous for a reference TM: a
+            # bare word like "Fueling" or "ENABLED" would fuzzily match a
+            # totally unrelated longer entry ("Feats require fuel" ->
+            # "위업에는 연료가 필요한 법"). For a single word there's no
+            # meaningful "fuzzy" -- either the TM has that exact word or it
+            # doesn't -- so require an exact (case-insensitive) source match.
+            key_lower = original.strip().lower()
+            for src, tgt in self._by_src.items():
+                if src.strip().lower() == key_lower:
+                    return tgt
+            return None
 
         self._ensure_word_index()
         threshold = _define_heuristic_threshold(src_wc)
@@ -215,7 +221,55 @@ class TranslationMemory:
             ((k, by_src[k]) for k in candidate_keys),
             max_score=max_score,
         )
-        return result[0] if result else None
+        if result is None:
+            return None
+
+        matched_translation, _score = result
+
+        # ── Short-string sanity gate ──────────────────────────────────────
+        # xTranslator's heuristic score alone is too permissive for SHORT
+        # entries. A 3-word UI label like "The Fuel Box" scores 2.0 (< the
+        # 3.0 threshold) against "Play the music box" purely because the two
+        # share the common words "the" and "box" -- and BSEK, unlike
+        # xTranslator, applies the hit directly with no human to reject it,
+        # so "The Fuel Box" silently becomes "뮤직 박스 재생하기" (Play the
+        # music box). The score works fine for long sentences (a couple of
+        # differing words don't matter) but collapses for terse labels where
+        # every word carries weight.
+        #
+        # Fix: for short sources, require the matched candidate's OWN source
+        # text to overlap the query heavily in BOTH directions. This rejects
+        # coincidental-common-word matches while still allowing genuine near
+        # duplicates (trailing punctuation, minor spacing). Longer strings
+        # keep the original lenient behavior.
+        #
+        # Look up the candidate's source text (best_fuzzy_match returns only
+        # the translation, so find the key whose translation matched among the
+        # small candidate pool -- cheap here since candidate_keys is already
+        # narrowed).
+        # Short/medium sources are where coincidental-common-word matches do
+        # real damage; long sentences tolerate a couple of differing words.
+        # 8 words covers terse UI labels and short status lines (the bulk of
+        # what gets mis-matched) while leaving genuine sentences alone.
+        if src_wc <= 8:
+            unique_src = set(src_words)
+            cand_src = None
+            for k in candidate_keys:
+                if by_src[k] == matched_translation:
+                    cand_src = k
+                    break
+            if cand_src is not None:
+                cand_words = set(tokenize(cand_src))
+                shared = unique_src & cand_words
+                # Both directions must be well-covered. e.g. "The Fuel Box" vs
+                # "Play the music box" = 0.67/0.50 -> rejected; a real near-dup
+                # (only punctuation differs) = ~1.0/~1.0 -> kept.
+                ratio_src = len(shared) / len(unique_src) if unique_src else 0.0
+                ratio_cand = len(shared) / len(cand_words) if cand_words else 0.0
+                if ratio_src < 0.85 or ratio_cand < 0.85:
+                    return None
+
+        return matched_translation
 
     def _ensure_word_index(self) -> None:
         """(Re)build the word-hash → [source_text] inverted index used by
