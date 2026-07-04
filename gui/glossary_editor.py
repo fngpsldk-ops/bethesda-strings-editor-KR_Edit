@@ -576,7 +576,16 @@ class GlossaryEditorDialog(QDialog):
 
 
 def _copy_entries(src: Glossary, dst: Glossary) -> None:
-    """Replace all entries in *dst* with deep copies from *src*."""
+    """Replace all entries in *dst* with deep copies from *src*.
+
+    Uses add_entry(..., _rebuild=False) and rebuilds the search index once at
+    the end, instead of once per entry. The default add_entry() rebuilds the
+    full chunked-regex search index on every call -- fine for interactive
+    single-row edits, but calling it N times while inserting N entries makes
+    a bulk copy (e.g. after importing a large CSV) O(N^2). With ~15k entries
+    that turned an instant save into several minutes of an unresponsive UI.
+    """
     dst.clear()
     for e in src.entries:
-        dst.add_entry(copy.deepcopy(e))
+        dst.add_entry(copy.deepcopy(e), _rebuild=False)
+    dst._rebuild_search_index()

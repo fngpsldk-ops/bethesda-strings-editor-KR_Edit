@@ -9,6 +9,7 @@ strings are never retranslated.
 
 from __future__ import annotations
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ _LINE_RE = re.compile(
 )
 
 _BACKSLASH_RE = re.compile(r'\\(.)')
-_ESCAPE_MAP = {'n': '\n', 't': '\t', '"': '"', '\\': '\\'}
+_ESCAPE_MAP = {'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\'}
 
 
 def _unescape(s: str) -> str:
@@ -108,6 +109,27 @@ class TranslationMemory:
         self._by_id.clear()
         self._by_src.clear()
         self.loaded_count = 0
+
+    def save_json(self, path: Path) -> None:
+        """Persist this TM as BSEK's own storage (config dir), independent of
+        whatever external TXT/TMX file it was originally loaded from. Mirrors
+        Glossary.save_json()'s pattern so the loaded TM survives app restarts
+        without the user having to re-import the source file every time."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "by_id": {str(k): v for k, v in self._by_id.items()},
+            "by_src": self._by_src,
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def load_json(self, path: Path) -> int:
+        """Load a previously self-saved JSON snapshot (see save_json). Returns
+        the total number of entries loaded (by_id + by_src)."""
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self._by_id = {int(k): v for k, v in data.get("by_id", {}).items()}
+        self._by_src = dict(data.get("by_src", {}))
+        self.loaded_count = len(self._by_id)
+        return len(self._by_id) + len(self._by_src)
 
     # ── Lookup ────────────────────────────────────────────────────────────────
 

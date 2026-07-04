@@ -615,6 +615,16 @@ class MainWindow(QMainWindow):
         # was only ever set on the ephemeral worker object directly, so any
         # settings change silently dropped a loaded TM with no error.
         self._translation_memory = None
+        _tm_snapshot = get_config_dir() / "translation_memory.json"
+        if _tm_snapshot.exists():
+            try:
+                from gui.translation_memory import TranslationMemory
+                tm = TranslationMemory()
+                n = tm.load_json(_tm_snapshot)
+                self._translation_memory = tm
+                logger.info("Auto-loaded translation memory snapshot: %d entries", n)
+            except Exception as exc:
+                logger.error("Failed to auto-load translation memory snapshot: %s", exc)
 
         # Lore RAG manager
         self._lore_rag_manager = None
@@ -6027,6 +6037,10 @@ class MainWindow(QMainWindow):
             if self.ollama_worker:
                 self.ollama_worker.translation_memory = memory
             self._translation_memory = memory
+            try:
+                memory.save_json(get_config_dir() / "translation_memory.json")
+            except Exception as exc:
+                logger.error("Failed to persist translation memory snapshot: %s", exc)
 
             applied = 0
             if self.current_file is not None:
@@ -6126,6 +6140,10 @@ class MainWindow(QMainWindow):
         if self.ollama_worker:
             self.ollama_worker.translation_memory = tm
         self._translation_memory = tm
+        try:
+            tm.save_json(get_config_dir() / "translation_memory.json")
+        except Exception as exc:
+            logger.error("Failed to persist translation memory snapshot: %s", exc)
         applied = 0
         if self.current_file is not None:
             applied = self.table_model.import_translations(tm.as_id_dict())
