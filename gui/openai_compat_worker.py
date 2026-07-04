@@ -111,12 +111,22 @@ class OpenAICompatWorker(QObject):
 
         Uses the `requests` library instead of the openai SDK to avoid
         httpx/Qt SSL conflicts that cause "Connection error" in threaded contexts.
+
+        Retries on 429 (rate limit) and 5xx (transient server error) with
+        exponential backoff + jitter, honoring a Retry-After header when the
+        API sends one. Without this, a burst of concurrent requests hitting a
+        low RPM cap (e.g. Gemini 2.5 Flash's free tier: 10 requests/minute)
+        made EVERY string in that burst fail outright with no retry at all --
+        each one silently became an empty/failed translation instead of
+        eventually succeeding a few seconds later.
         """
         if not self.api_key:
             raise RuntimeError(
                 "OpenAI-compatible API key is not set.\n"
                 "Please enter your API key in Settings > Cloud AI Backend."
             )
+        import random
+        import time
         import requests
         import json
         url = self.base_url.rstrip("/") + "/chat/completions"
@@ -132,13 +142,37 @@ class OpenAICompatWorker(QObject):
             ],
             "temperature": self.temperature,
         }
-        resp = requests.post(
-            url, headers=headers,
-            data=json.dumps(payload),
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        return (resp.json()["choices"][0]["message"]["content"] or "").strip()
+
+        max_retries = 5
+        base_delay = 2.0
+        max_delay = 60.0
+
+        for attempt in range(max_retries + 1):
+            resp = requests.post(
+                url, headers=headers,
+                data=json.dumps(payload),
+                timeout=self.timeout,
+            )
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt == max_retries:
+                    resp.raise_for_status()
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = float(retry_after)
+                    except ValueError:
+                        delay = base_delay * (2 ** attempt)
+                else:
+                    delay = base_delay * (2 ** attempt)
+                delay = min(delay, max_delay) + random.uniform(0, 1.0)
+                logger.warning(
+                    "[RATE-LIMIT] HTTP %d, retrying in %.1fs (attempt %d/%d)",
+                    resp.status_code, delay, attempt + 1, max_retries,
+                )
+                time.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return (resp.json()["choices"][0]["message"]["content"] or "").strip()
 
     # ── settings hash (cache invalidation) ─────────────────────────────────────
     def _compute_settings_hash(self) -> str:
