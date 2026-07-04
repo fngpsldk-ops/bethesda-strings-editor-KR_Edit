@@ -92,7 +92,13 @@ _FIELD_DEFS: list[tuple[str, str, int, bool, int]] = [
     ("ATTX", "FURN", 0, False, 0),  # Activate Text Override
     ("ATTX", "FLOR", 0, False, 0),  # Activate Text Override
     ("ATTX", "TERM", 0, False, 0),  # Activate Text Override
-    ("CNAM", "DOOR", 0, False, 0),  # Alternate Text - Close
+    # ("CNAM", "DOOR", 0, False, 0),  # REMOVED — the "Alternate Text - Close"
+    # assumption was wrong. Confirmed in practice (rbt_RealFuel_RE.esm,
+    # _RF_SiphonLockHighTech) that this field actually holds an animation
+    # RESOURCE PATH (e.g. "setdressing\animated\fridgedoors\fridge01doorbot\
+    # animations"), not player-facing text. Translating it half-mangles the
+    # path, which the game engine can then fail to resolve at runtime —
+    # breaking the door's animation, not just producing an awkward string.
     ("NNAM", "KEYM", 0, False, 0),  # Key short name
     ("NNAM", "MISC", 0, False, 0),  # Misc item short name
     ("EPF2", "PERK", 0, False, 0),  # Perk entry-point button label (EPFT=4)
@@ -352,11 +358,38 @@ class EspFile:
             except Exception:
                 text = raw.decode("latin-1", errors="replace")
 
+            if _looks_like_resource_path(text):
+                continue
+
+            note = ""
+            if rec_str == "QUST" and fsig_str == "FULL":
+                # QUST/FULL is the quest's internal Creation-Kit name. For many
+                # quests (especially script-carrier "utility" quests that exist
+                # purely to run background Papyrus logic, never appear in the
+                # in-game journal) it's a short, context-free 1-3 word label
+                # ("Item Spawn", "Travel Handler") that an LLM will happily
+                # reinterpret as something else entirely absent any context
+                # (confirmed: "Injector Quest" -> "오라클 임무"/"Oracle Quest",
+                # "Item Spawn" -> "볼텍스 스폰"/"Vortex Spawn" -- both fluent
+                # Korean, both completely unrelated to the source). Whether
+                # THIS particular quest is player-visible or not isn't
+                # reliably knowable from the FULL field alone, so rather than
+                # guess and risk hiding a real quest title, every QUST/FULL
+                # gets a caution against inventing content instead.
+                note = (
+                    "This is a quest's internal Creation Kit name. It may or "
+                    "may not ever be shown to the player (some quests exist "
+                    "purely as background script carriers). Translate "
+                    "literally/conservatively — do not invent a different "
+                    "theme or meaning for an ambiguous short label."
+                )
+
             self.strings.append(EspStringEntry(
                 form_id=form_id, edid=edid,
                 record_sig=rec_str, field_sig=fsig_str,
                 list_index=list_index, string_id=0,
                 original=text, _raw=bytes(fdata),
+                context_note=note,
             ))
 
         # Synthesize a context_note for GPOF from its own NNAM/DNAM, since it
@@ -498,6 +531,28 @@ class EspFile:
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
+
+def _looks_like_resource_path(text: str) -> bool:
+    """Heuristic safety net: does this look like an internal resource path
+    rather than player-facing text?
+
+    Field-to-meaning assumptions carried over from older Bethesda games
+    aren't always right for Starfield (confirmed case: DOOR/CNAM was assumed
+    to hold "Alternate Text - Close" but actually holds an animation
+    resource path like "setdressing\\animated\\fridgedoors\\fridge01doorbot\\
+    animations"). Translating a path can silently break the resource lookup
+    at runtime instead of just producing an awkward string, so this is a
+    blanket filter applied regardless of which field/record matched --
+    protection against similar undiscovered mistakes in other fields, not
+    just the one instance we found and removed above.
+    """
+    if "\\" not in text and "/" not in text:
+        return False
+    # Real display text containing a path separator essentially always also
+    # has a space somewhere (sentences, "Item Name - Variant", etc.); bare
+    # resource paths don't.
+    return " " not in text
+
 
 def _field_list_index(
     field_sig: str, rec_sig: str
