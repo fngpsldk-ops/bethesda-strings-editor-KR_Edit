@@ -243,3 +243,14 @@ class TranslationCache:
     def __len__(self) -> int:
         with self._lock:
             return len(self._data)
+
+    def __bool__(self) -> bool:
+        # Without this, Python falls back to __len__ for truthiness, so an
+        # EMPTY cache (len==0) would be falsy. Every `if self.translation_cache:`
+        # check in the workers (openai_compat_worker.py, ollama_worker.py,
+        # claude_translation_worker.py) would then skip BOTH the get() and the
+        # set() at the end -- meaning a session starting from an empty cache
+        # could never write its very first entry, since the write-side check
+        # has the same `if ... self.translation_cache:` gate. The object
+        # existing at all (regardless of entry count) should always be truthy.
+        return True

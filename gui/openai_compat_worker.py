@@ -225,8 +225,14 @@ class OpenAICompatWorker(QObject):
             if self.translation_cache:
                 cache_key = self._make_cache_key(source_text)
                 cached = self.translation_cache.get(cache_key)
+                logger.info(
+                    "[DIAG] cache lookup string_id=%s key=%s...  hit=%s  cache_len=%d  settings_hash=%s",
+                    req.string_id, cache_key[:12], cached is not None, len(self.translation_cache), self._settings_hash,
+                )
                 if cached:
                     return req.index, cached, req.string_id
+            else:
+                logger.info("[DIAG] cache lookup SKIPPED (self.translation_cache is falsy) string_id=%s", req.string_id)
 
             # Term protection
             protected = source_text
