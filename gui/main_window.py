@@ -681,6 +681,7 @@ class MainWindow(QMainWindow):
 
         # Setup UI and signals
         self._setup_ui()
+        self._refresh_tm_status_label()  # reflect any TM auto-loaded above, now that the status bar exists
         self._connect_signals()
         self._register_actions()
         self.keyboard_manager.apply_all_custom_shortcuts()
@@ -1153,6 +1154,21 @@ class MainWindow(QMainWindow):
         self._gpu_widget = GpuMonitorWidget()
         status_bar.addPermanentWidget(self._gpu_widget)
 
+        # Translation Memory status indicator — clickable, opens the viewer.
+        # Exists because loading a TM previously gave only a one-time status
+        # message with nothing to check afterward ("did it actually stick?").
+        self._tm_status_btn = QPushButton()
+        self._tm_status_btn.setObjectName("TmStatusButton")
+        self._tm_status_btn.setFlat(True)
+        self._tm_status_btn.setCursor(Qt.PointingHandCursor)
+        self._tm_status_btn.setStyleSheet(
+            "QPushButton#TmStatusButton {"
+            "  font-size: 11px; padding: 0 8px; text-decoration: underline; }"
+        )
+        self._tm_status_btn.clicked.connect(self._open_translation_memory_viewer)
+        status_bar.addPermanentWidget(self._tm_status_btn)
+        self._refresh_tm_status_label()
+
         # Debounce timer so rapid dataChanged signals don't thrash the count loop
         self._stats_refresh_timer = QTimer(self)
         self._stats_refresh_timer.setSingleShot(True)
@@ -1605,6 +1621,17 @@ class MainWindow(QMainWindow):
         self.load_memory_action.setIcon(QIcon.fromTheme("document-open"))
         self.load_memory_action.triggered.connect(self._load_translation_memory)
         trans_menu.addAction(self.load_memory_action)
+
+        self.view_memory_action = QAction(
+            self.tr("View Translation Memory..."), self
+        )
+        self.view_memory_action.setIcon(QIcon.fromTheme("edit-find"))
+        self.view_memory_action.setToolTip(self.tr(
+            "Browse/search the currently loaded Translation Memory, and "
+            "confirm how many entries are actually loaded."
+        ))
+        self.view_memory_action.triggered.connect(self._open_translation_memory_viewer)
+        trans_menu.addAction(self.view_memory_action)
 
         self.export_memory_action = QAction(
             self.tr("Export Translation Memory as TMX..."), self
@@ -6013,6 +6040,35 @@ class MainWindow(QMainWindow):
 
     @Slot()
     @Slot()
+    def _refresh_tm_status_label(self) -> None:
+        """Update the always-visible status-bar TM indicator.
+
+        This is the answer to "is the TM actually loaded?" -- previously the
+        only feedback was a one-time status message at load time, with
+        nothing to check afterward (e.g. after _init_translation_worker()
+        rebuilds the worker, or after restarting the app and relying on the
+        auto-loaded JSON snapshot).
+        """
+        tm = self._translation_memory
+        if tm and tm._by_src:
+            self._tm_status_btn.setText(
+                self.tr("TM: {n} entries").format(n=f"{len(tm._by_src):,}")
+            )
+            self._tm_status_btn.setToolTip(
+                self.tr("Click to browse/search the loaded Translation Memory.")
+            )
+        else:
+            self._tm_status_btn.setText(self.tr("TM: not loaded"))
+            self._tm_status_btn.setToolTip(
+                self.tr("No Translation Memory loaded. Click to open the viewer, "
+                        "or use Translation → Load Translation Memory...")
+            )
+
+    def _open_translation_memory_viewer(self) -> None:
+        from gui.translation_memory_viewer import TranslationMemoryViewerDialog
+        dlg = TranslationMemoryViewerDialog(self._translation_memory, parent=self)
+        dlg.exec()
+
     def _load_translation_memory(self):
         """Load a TXT or TMX translation memory and pre-fill the table with known translations."""
         file_path, _ = get_open_filename(
@@ -6037,6 +6093,7 @@ class MainWindow(QMainWindow):
             if self.ollama_worker:
                 self.ollama_worker.translation_memory = memory
             self._translation_memory = memory
+            self._refresh_tm_status_label()
             try:
                 memory.save_json(get_config_dir() / "translation_memory.json")
             except Exception as exc:
@@ -6140,6 +6197,7 @@ class MainWindow(QMainWindow):
         if self.ollama_worker:
             self.ollama_worker.translation_memory = tm
         self._translation_memory = tm
+        self._refresh_tm_status_label()
         try:
             tm.save_json(get_config_dir() / "translation_memory.json")
         except Exception as exc:
