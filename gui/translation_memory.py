@@ -53,6 +53,13 @@ class TranslationMemory:
         self.source_path: str = ""
         self.loaded_count: int = 0
 
+        # Word-hash → [source_text] inverted index for get_fuzzy(), built/
+        # refreshed lazily -- see _ensure_word_index(). Avoids re-tokenizing
+        # and scoring every candidate in _by_src (which can be 100k+ entries
+        # in a merged reference TM) on every single fuzzy lookup.
+        self._word_index: dict[int, list[str]] = {}
+        self._word_index_size: int = -1
+
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load(
@@ -149,19 +156,79 @@ class TranslationMemory:
         fuzzy_match module is unavailable.
 
         Only called after get_by_id() and get_by_source() both return None.
+
+        Performance note: fuzzy_score()'s word-position matching can only
+        pass max_score if at least (src_wc - threshold) of the source's words
+        are found NEAR their expected position in the candidate -- which
+        requires those words to appear in the candidate AT ALL. A candidate
+        that shares fewer than that many distinct words with the source
+        therefore cannot possibly pass, regardless of position. The inverted
+        word index below uses this as a safe (if slightly loose -- it ignores
+        exact positioning, only requiring *presence*) pre-filter: it's a
+        superset of what a full scan would find, never a subset, so results
+        are unchanged. Reduces the candidate pool from the full corpus
+        (100k+ entries in a merged reference TM) down to only the ones
+        sharing meaningful vocabulary with the query -- this is what actually
+        matters, since a simple word-*count* filter (an earlier attempt) barely
+        helped: ~90% of a typical corpus falls within the word-count window
+        of any given medium-length query.
         """
         if not self._by_src:
             return None
         try:
-            from gui.fuzzy_match import best_fuzzy_match
+            from gui.fuzzy_match import (
+                best_fuzzy_match, tokenize, _define_heuristic_threshold,
+            )
         except ImportError:
             return None
+
+        src_words = tokenize(original)
+        src_wc = len(src_words)
+
+        if src_wc <= 1:
+            # Single-word queries use fuzzy_score()'s separate substring-match
+            # path, which this word-sharing index isn't built around. Single-
+            # word entries are normally a small slice of a real TM, so a full
+            # scan here stays fast.
+            result = best_fuzzy_match(original, self._by_src.items(), max_score=max_score)
+            return result[0] if result else None
+
+        self._ensure_word_index()
+        threshold = _define_heuristic_threshold(src_wc)
+
+        # Minimum number of the source's DISTINCT words that must appear
+        # somewhere in a candidate for it to have any chance of passing.
+        unique_src_words = set(src_words)
+        min_shared = max(1, len(unique_src_words) - threshold)
+
+        from collections import Counter
+        shared_counts: Counter = Counter()
+        for w in unique_src_words:
+            for cnd_text in self._word_index.get(w, ()):
+                shared_counts[cnd_text] += 1
+
+        candidate_keys = [t for t, n in shared_counts.items() if n >= min_shared]
+
+        by_src = self._by_src
         result = best_fuzzy_match(
             original,
-            self._by_src.items(),
+            ((k, by_src[k]) for k in candidate_keys),
             max_score=max_score,
         )
         return result[0] if result else None
+
+    def _ensure_word_index(self) -> None:
+        """(Re)build the word-hash → [source_text] inverted index used by
+        get_fuzzy(), if _by_src changed size since the last build."""
+        if self._word_index_size == len(self._by_src):
+            return
+        from gui.fuzzy_match import tokenize
+        index: dict[int, list[str]] = {}
+        for text in self._by_src:
+            for w in set(tokenize(text)):
+                index.setdefault(w, []).append(text)
+        self._word_index = index
+        self._word_index_size = len(self._by_src)
 
     # ── TMX support ───────────────────────────────────────────────────────────
 
