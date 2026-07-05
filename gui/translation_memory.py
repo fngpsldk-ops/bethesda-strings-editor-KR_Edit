@@ -193,7 +193,27 @@ class TranslationMemory:
             # "위업에는 연료가 필요한 법"). For a single word there's no
             # meaningful "fuzzy" -- either the TM has that exact word or it
             # doesn't -- so require an exact (case-insensitive) source match.
-            key_lower = original.strip().lower()
+            #
+            # But exact match alone still isn't safe for very short words.
+            # Confirmed in practice: "On" (a UI toggle state, "켜짐") matched
+            # the TM's one and only case-insensitive "on" -- which came from
+            # an unrelated sentence using "on" as an ordinary preposition, and
+            # happened to be rendered "대상:" (Target:) in THAT context.
+            # Likewise "OFF" -> "실탄 중량 없음" (a completely unrelated
+            # ammo-weight label). Very short words (on/off/no/up/in/at...)
+            # are exactly the ones most likely to double as ordinary English
+            # function words with unrelated senses scattered across a huge
+            # corpus -- a single flat text-key dictionary has no way to tell
+            # "the toggle-state word" apart from "the preposition that
+            # happens to be spelled the same". Longer single words
+            # (ENABLED/DISABLED/STREAMLINED) are essentially always
+            # game-specific UI terms without this ambiguity, so they keep
+            # using exact-match reuse; anything <=3 characters always goes
+            # to the AI fresh instead.
+            stripped = original.strip()
+            if len(stripped) <= 3:
+                return None
+            key_lower = stripped.lower()
             for src, tgt in self._by_src.items():
                 if src.strip().lower() == key_lower:
                     return tgt
