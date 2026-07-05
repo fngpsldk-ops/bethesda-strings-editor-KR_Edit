@@ -145,7 +145,21 @@ class TranslationMemory:
         return self._by_id.get(string_id)
 
     def get_by_source(self, original: str) -> str | None:
-        """Return translation for *original* source text, or None."""
+        """Return translation for *original* source text, or None.
+
+        Very short strings (<=3 chars) are excluded even on an EXACT match.
+        Confirmed in practice: "OFF" exact-matches the official patch's one
+        and only "OFF" entry, which came from an ammo-weight label in a
+        completely different mod/context ("실탄 중량 없음") -- unrelated to
+        a generic UI on/off toggle. This is the same word-sense-ambiguity
+        problem get_fuzzy()'s single-word path already guards against; this
+        method needed the identical guard and didn't have it, so a query
+        that hit get_by_source() (checked BEFORE get_fuzzy() in the worker's
+        lookup order) returned the wrong value before get_fuzzy() was ever
+        reached.
+        """
+        if len(original.strip()) <= 3:
+            return None
         return self._by_src.get(original)
 
     def get_fuzzy(self, original: str, max_score: float = 3.0) -> Optional[str]:
