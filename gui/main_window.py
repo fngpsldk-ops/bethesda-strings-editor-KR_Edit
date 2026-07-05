@@ -1836,11 +1836,15 @@ class MainWindow(QMainWindow):
 
         self.audio_panel_action = QAction(self.tr("&Audio Preview"), self)
         self.audio_panel_action.setIcon(QIcon.fromTheme("media-playback-start"))
-        self.audio_panel_action.setShortcut("Ctrl+Shift+A")
+        # Was "Ctrl+Shift+A" -- collided with translate_all_action's shortcut
+        # (registered earlier, same key combo), which silently ate the
+        # "Translate All" shortcut since Qt won't fire an ambiguous shortcut
+        # for either action. Moved to a key that isn't used anywhere else.
+        self.audio_panel_action.setShortcut("Ctrl+Shift+U")
         self.audio_panel_action.setCheckable(True)
         self.audio_panel_action.setChecked(self.settings.enable_audio_preview)
         self.audio_panel_action.setToolTip(
-            self.tr("Show/hide the Audio Preview panel (Ctrl+Shift+A)")
+            self.tr("Show/hide the Audio Preview panel (Ctrl+Shift+U)")
         )
         self.audio_panel_action.triggered.connect(self._toggle_audio_panel)
         view_menu.addAction(self.audio_panel_action)
@@ -2911,11 +2915,12 @@ class MainWindow(QMainWindow):
         file_path, _ = get_save_filename(
             self,
             self.tr("Save As"),
-            str(Path.home() / default_name),
+            self._last_save_dir(default_name),
             file_filter,
         )
         if not file_path:
             return
+        self._remember_save_dir(file_path)
 
         try:
             if is_ba2:
@@ -4008,11 +4013,44 @@ class MainWindow(QMainWindow):
 
     @Slot(int, str)
     def _on_string_corrected(self, _row: int, original_text: str) -> None:
-        """Forward a user correction signal to the estimator for weight learning."""
+        """Forward a user correction signal to the estimator for weight learning,
+        and write the correction into the translation cache.
+
+        Previously only the estimator was updated. The cache write was
+        missing entirely, so a manual fix never stuck: the same source text
+        appearing again later (a different mod, or after a cache-clear +
+        retranslate) would just get freshly (mis)translated by the AI again
+        instead of reusing what the person already corrected by hand.
+
+        This only writes the cache key format used by OllamaWorker and
+        OpenAICompatWorker (TranslationCache.make_key). ClaudeTranslationWorker
+        currently computes its cache key slightly differently (no
+        settings_hash, different field order) — a pre-existing inconsistency
+        between the three workers, left untouched here since it lives in the
+        worker's translation logic, not the caching layer this fix targets.
+        """
         if self._pre_estimator is not None:
             self._pre_estimator.record_correction(
                 original_text, self.settings.default_source_lang
             )
+
+        if not self.settings.enable_cache or not self.ollama_worker:
+            return
+        try:
+            translated_text = self.table_model._data[_row].get("translated", "")
+            if not translated_text:
+                return
+            from gui.translation_cache import TranslationCache
+            key = TranslationCache.make_key(
+                original_text,
+                getattr(self.ollama_worker, "model", ""),
+                getattr(self.ollama_worker, "source_lang", self.settings.default_source_lang),
+                getattr(self.ollama_worker, "target_lang", self.settings.default_target_lang),
+                getattr(self.ollama_worker, "_settings_hash", ""),
+            )
+            self.translation_cache.set(key, translated_text)
+        except Exception as exc:
+            logger.error("Failed to cache manual correction: %s", exc)
 
     # ── Glossary ───────────────────────────────────────────────────────────────
 
@@ -5527,11 +5565,12 @@ class MainWindow(QMainWindow):
         file_path, _ = get_save_filename(
             self,
             self.tr("Export to TXT"),
-            str(Path.home() / default_name),
+            self._last_save_dir(default_name),
             self.tr("Text Files (*.txt *.TXT);;All Files (*)"),
         )
         if not file_path:
             return
+        self._remember_save_dir(file_path)
 
         try:
             self.statusBar().showMessage(
@@ -5904,11 +5943,12 @@ class MainWindow(QMainWindow):
         file_path, _ = get_save_filename(
             self,
             self.tr("Export to XML (SST)"),
-            str(Path.home() / default_name),
+            self._last_save_dir(default_name),
             self.tr("XML Files (*.xml);;All Files (*)"),
         )
         if not file_path:
             return
+        self._remember_save_dir(file_path)
 
         try:
             self.statusBar().showMessage(
@@ -6068,6 +6108,24 @@ class MainWindow(QMainWindow):
         from gui.translation_memory_viewer import TranslationMemoryViewerDialog
         dlg = TranslationMemoryViewerDialog(self._translation_memory, parent=self)
         dlg.exec()
+
+    def _last_save_dir(self, default_name: str) -> str:
+        """Return the starting path for a Save-As style dialog: the last
+        directory the person actually saved a file to, joined with
+        *default_name* -- or their home directory if nothing's been saved
+        yet. Previously every Save-As dialog always defaulted back to
+        Path.home(), ignoring wherever they'd saved to moments before."""
+        from PySide6.QtCore import QSettings
+        qs = QSettings("BSE", "BethesdaStringsEditor")
+        last_dir = qs.value("Dialogs/lastSaveDir", "")
+        base = Path(last_dir) if last_dir and Path(last_dir).is_dir() else Path.home()
+        return str(base / default_name)
+
+    def _remember_save_dir(self, file_path: str) -> None:
+        """Persist the directory of a just-completed save for next time."""
+        from PySide6.QtCore import QSettings
+        qs = QSettings("BSE", "BethesdaStringsEditor")
+        qs.setValue("Dialogs/lastSaveDir", str(Path(file_path).parent))
 
     def _load_translation_memory(self):
         """Load a TXT or TMX translation memory and pre-fill the table with known translations."""
