@@ -1080,6 +1080,12 @@ class MainWindow(QMainWindow):
         self.table_model = StringTableModel()
         self.table_model.set_color_blind_mode(self.settings.color_blind_mode)
         self.table_view.setModel(self.table_model)
+        # Click-to-sort on column headers (ascending/descending toggle).
+        # Disabled automatically while a translation batch is running -- see
+        # _start_translation / _on_ollama_finished -- since row positions are
+        # used to route in-flight results back to the right row, and a
+        # mid-batch sort would silently misdirect them.
+        self.table_view.setSortingEnabled(True)
 
         # Live stats: refresh on any data or layout change
         self.table_model.dataChanged.connect(
@@ -1324,6 +1330,38 @@ class MainWindow(QMainWindow):
         self.translate_selected_action.triggered.connect(self.translate_selected)
         self.translate_selected_action.setEnabled(False)
         trans_menu.addAction(self.translate_selected_action)
+
+        self.force_retranslate_selected_action = QAction(
+            self.tr("Force &Retranslate Selected"), self, shortcut=QKeySequence("Ctrl+Alt+T")
+        )
+        self.force_retranslate_selected_action.setIcon(QIcon.fromTheme("edit-translate"))
+        self.force_retranslate_selected_action.setToolTip(self.tr(
+            "Retranslate the selected rows even if they already have a "
+            "translation (clears it first). 'Translate Selected' silently "
+            "skips any row that already has translated text, which is the "
+            "right default but means it does nothing for a row you need to "
+            "force through again -- e.g. after a bug fix that changes what "
+            "TM/cache/the AI would now return for that exact text."
+        ))
+        self.force_retranslate_selected_action.triggered.connect(self._force_retranslate_selected)
+        self.force_retranslate_selected_action.setEnabled(False)
+        trans_menu.addAction(self.force_retranslate_selected_action)
+
+        self.propagate_translation_action = QAction(
+            self.tr("&Apply to All Identical Originals"), self, shortcut=QKeySequence("Ctrl+Alt+D")
+        )
+        self.propagate_translation_action.setIcon(QIcon.fromTheme("edit-copy"))
+        self.propagate_translation_action.setToolTip(self.tr(
+            "Copy the selected row's translation to every other row in this "
+            "file whose original text is character-for-character identical. "
+            "Fixes the AI translating the same repeated line differently "
+            "each time it's asked (no shared memory between independent "
+            "API calls) -- translate/approve one occurrence by hand, then "
+            "use this to make every duplicate match it exactly."
+        ))
+        self.propagate_translation_action.triggered.connect(self._propagate_translation_to_duplicates)
+        self.propagate_translation_action.setEnabled(False)
+        trans_menu.addAction(self.propagate_translation_action)
 
         self.translate_all_action = QAction(
             self.tr("Translate &All"), self, shortcut=QKeySequence("Ctrl+Shift+A")
@@ -2078,6 +2116,10 @@ class MainWindow(QMainWindow):
             self.quality_check_action.setEnabled(has_file)
         if hasattr(self, "auto_retranslate_action"):
             self.auto_retranslate_action.setEnabled(has_file)
+        if hasattr(self, "force_retranslate_selected_action"):
+            self.force_retranslate_selected_action.setEnabled(has_file)
+        if hasattr(self, "propagate_translation_action"):
+            self.propagate_translation_action.setEnabled(has_file)
         if hasattr(self, "import_quality_action"):
             self.import_quality_action.setEnabled(has_file)
         if hasattr(self, "export_training_data_action"):
@@ -2970,6 +3012,89 @@ class MainWindow(QMainWindow):
             )
 
     @Slot()
+    def _force_retranslate_selected(self):
+        """Retranslate the selected rows even if they already have a
+        translation. translate_selected() silently skips any row where
+        row["translated"] is already non-empty (the right default for a
+        normal batch run), which also means clicking "translate this one
+        row again" after a TM/cache/prompt fix does nothing at all if the
+        row still holds the old (possibly wrong) result -- the request never
+        even reaches the worker. This clears the translated text for the
+        selected rows first, then hands off to the normal translate flow,
+        which will now actually run them."""
+        indices = [idx.row() for idx in self.table_view.selectionModel().selectedRows()]
+        if not indices:
+            QMessageBox.information(
+                self, self.tr("No Selection"), self.tr("Select strings first.")
+            )
+            return
+        for idx in indices:
+            self.table_model.set_translated_text(idx, "")
+        self.translate_selected()
+
+    def _propagate_translation_to_duplicates(self):
+        """Copy the (single) selected row's translation to every other row
+        in this file whose original text matches character-for-character.
+
+        Each occurrence of a repeated line is currently translated by an
+        independent API call with no awareness of the others, so the exact
+        same English sentence can come back worded differently each time
+        (confirmed: "Heretical Writings" -> "이단 문헌" in one row, "이단의
+        저작" in another). Rather than trying to force the AI itself to be
+        perfectly consistent, this lets the person translate/approve ONE
+        occurrence by hand and stamp that exact wording onto every duplicate,
+        which is both more reliable and free (no extra API calls).
+        """
+        indices = [idx.row() for idx in self.table_view.selectionModel().selectedRows()]
+        if not indices:
+            QMessageBox.information(
+                self, self.tr("No Selection"), self.tr("Select one translated string first.")
+            )
+            return
+        if len(indices) > 1:
+            QMessageBox.information(
+                self,
+                self.tr("Select One Row"),
+                self.tr("Select exactly one row — the one whose translation "
+                        "you want applied to all its duplicates."),
+            )
+            return
+
+        src_row = self.table_model.get_row_data(indices[0])
+        original = src_row.get("original", "")
+        translation = src_row.get("translated", "")
+        if not original.strip():
+            return
+        if not translation.strip():
+            QMessageBox.information(
+                self,
+                self.tr("Nothing to Apply"),
+                self.tr("The selected row doesn't have a translation yet."),
+            )
+            return
+
+        batch = []
+        for i in range(self.table_model.rowCount()):
+            if i == indices[0]:
+                continue
+            row = self.table_model.get_row_data(i)
+            if row.get("original", "") == original and row.get("translated", "") != translation:
+                batch.append((i, translation))
+
+        if not batch:
+            QMessageBox.information(
+                self,
+                self.tr("No Duplicates Found"),
+                self.tr("No other row in this file has the exact same original text."),
+            )
+            return
+
+        self.table_model.set_translated_text_batch(batch)
+        self.statusBar().showMessage(
+            self.tr("Applied translation to {n} duplicate row(s).").format(n=len(batch)),
+            5000,
+        )
+
     def translate_selected(self):
         """Translate selected strings with auto-term detection."""
         if not self.current_file:
@@ -3097,6 +3222,13 @@ class MainWindow(QMainWindow):
                 return
 
         # Show progress UI BEFORE emitting signal
+        # Row positions are used to route each in-flight translation result
+        # back to the correct row (TranslationRequest.index below). Sorting
+        # the table mid-batch would silently misdirect results to whatever
+        # now occupies that row position, so sorting is locked for the
+        # duration -- from here on we're committed to actually starting a
+        # batch (all the early-return checks above have already passed).
+        self.table_view.setSortingEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, len(requests))
         self.progress_bar.setValue(0)
@@ -3458,6 +3590,7 @@ class MainWindow(QMainWindow):
     @Slot(int, int)
     def _on_ollama_finished(self, successful: int, failed: int):
         """Translation batch completed."""
+        self.table_view.setSortingEnabled(True)
         if self._is_translating_txt:
             self._finish_txt_translation(successful, failed)
             return
@@ -5223,6 +5356,18 @@ class MainWindow(QMainWindow):
         km.register_qaction("translate_selected", self.translate_selected_action, "Translation",
                              description=self.tr("Translate the selected strings using AI"),
                              keywords=("ai", "ollama", "translate"),
+                             enabled_check=has_sel)
+        km.register_qaction("force_retranslate_selected", self.force_retranslate_selected_action, "Translation",
+                             description=self.tr(
+                                 "Retranslate the selected strings even if already translated"
+                             ),
+                             keywords=("ai", "retranslate", "force", "redo"),
+                             enabled_check=has_sel)
+        km.register_qaction("propagate_translation", self.propagate_translation_action, "Translation",
+                             description=self.tr(
+                                 "Apply the selected row's translation to every identical original in this file"
+                             ),
+                             keywords=("duplicate", "propagate", "apply", "copy"),
                              enabled_check=has_sel)
         km.register_qaction("translate_all", self.translate_all_action, "Translation",
                              description=self.tr("Translate all untranslated strings"),

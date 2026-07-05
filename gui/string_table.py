@@ -463,6 +463,56 @@ class StringTableModel(QAbstractTableModel):
             return 0
         return len(self.COLUMNS)
 
+    def _sort_key_for_row(self, row_data: dict, col_name: str):
+        """Return a sortable key for one row/column, matching what data()
+        actually displays for that column+mode (so sort order matches what
+        the person sees, e.g. FormID as hex text sorts the same whether
+        compared as the padded hex string or the underlying int)."""
+        if col_name == "ID":
+            return row_data.get("id", 0)
+        if col_name == "Original":
+            return row_data.get("original", "").lower()
+        if col_name == "Translated":
+            return row_data.get("translated", "").lower()
+        if col_name == "Length":
+            # "EDID" in esp mode (text), plain length elsewhere (numeric)
+            v = row_data.get("length", "")
+            return str(v).lower() if self._mode == "esp" else v
+        if col_name == "Offset":
+            # "Type" in esp/txt mode (text), raw offset elsewhere (numeric)
+            v = row_data.get("offset", "")
+            return str(v).lower() if self._mode in ("esp", "txt") else v
+        if col_name == "Status":
+            return row_data.get("status", "")
+        if col_name == "Kind":
+            # Icon-only column with no independent sortable value of its own
+            # (data() returns "" for DisplayRole, just shows an icon). A
+            # meaningful sort here would need _string_type(row_index), but
+            # this key function only receives the row dict, not its index --
+            # doing an O(n) dict-equality search to recover the index would
+            # make the whole sort O(n^2 log n) and could mis-resolve if two
+            # rows happen to be equal dicts. Not worth it for an icon column;
+            # sorting by it is effectively a no-op (stable, unchanged order).
+            return 0
+        return ""
+
+    def sort(self, column: int, order=Qt.AscendingOrder) -> None:
+        """Sort all rows by the given column. Enables click-to-sort on the
+        table's column headers (main_window.py calls
+        table_view.setSortingEnabled(True), which is what actually wires
+        header clicks to this method — this alone is inert without that)."""
+        if column < 0 or column >= len(self.COLUMNS):
+            return
+        col_name = self.COLUMNS[column]
+        self.layoutAboutToBeChanged.emit()
+        try:
+            self._data.sort(
+                key=lambda row: self._sort_key_for_row(row, col_name),
+                reverse=(order == Qt.DescendingOrder),
+            )
+        finally:
+            self.layoutChanged.emit()
+
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         """Return header data."""
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
