@@ -58,6 +58,7 @@ class StringTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data: List[dict] = []
+        self._translation_lock = False  # see sort() / set_translation_lock()
         self._encoding = "utf-8"
         self._locale = None
         self._mode = "strings"  # "strings", "esp", or "txt"
@@ -500,7 +501,27 @@ class StringTableModel(QAbstractTableModel):
         """Sort all rows by the given column. Enables click-to-sort on the
         table's column headers (main_window.py calls
         table_view.setSortingEnabled(True), which is what actually wires
-        header clicks to this method — this alone is inert without that)."""
+        header clicks to this method — this alone is inert without that).
+
+        Hard no-ops while a translation batch is active (see
+        set_translation_lock). Translation results are routed back to rows
+        by their captured list POSITION (TranslationRequest.index) at the
+        moment the batch was built; physically reordering self._data at any
+        point before every result lands would silently misdirect
+        already-in-flight results to whatever row now sits at that position.
+        main_window.py already toggles table_view.setSortingEnabled() around
+        a batch as the primary guard, but that alone depends on every
+        translate-triggering code path remembering to do so correctly, and
+        on Qt never re-triggering a sort through some other route (its
+        QTableView re-applies the active sort column automatically on
+        dataChanged/layoutChanged when sorting is enabled, which is
+        precisely the failure mode that produced this bug in the first
+        place). This flag is the actual, unconditional backstop: sort()
+        itself refuses to touch row order at all while it's set, regardless
+        of who or what asked.
+        """
+        if self._translation_lock:
+            return
         if column < 0 or column >= len(self.COLUMNS):
             return
         col_name = self.COLUMNS[column]
@@ -512,6 +533,10 @@ class StringTableModel(QAbstractTableModel):
             )
         finally:
             self.layoutChanged.emit()
+
+    def set_translation_lock(self, locked: bool) -> None:
+        """Enable/disable the sort() no-op guard (see sort()'s docstring)."""
+        self._translation_lock = locked
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         """Return header data."""

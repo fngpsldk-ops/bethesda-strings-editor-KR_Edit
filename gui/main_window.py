@@ -3229,6 +3229,7 @@ class MainWindow(QMainWindow):
         # duration -- from here on we're committed to actually starting a
         # batch (all the early-return checks above have already passed).
         self.table_view.setSortingEnabled(False)
+        self.table_model.set_translation_lock(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, len(requests))
         self.progress_bar.setValue(0)
@@ -3591,6 +3592,7 @@ class MainWindow(QMainWindow):
     def _on_ollama_finished(self, successful: int, failed: int):
         """Translation batch completed."""
         self.table_view.setSortingEnabled(True)
+        self.table_model.set_translation_lock(False)
         if self._is_translating_txt:
             self._finish_txt_translation(successful, failed)
             return
