@@ -3462,6 +3462,12 @@ class MainWindow(QMainWindow):
             self._set_ui_enabled(False)
             self._eta_start_time = time.monotonic()
             self._eta_batch_total = len(requests)
+            # TXT-mode translation is a fourth independent batch-starter that
+            # never went through _start_translation (which normally locks
+            # sorting) -- same class of bug as _retranslate_with_hints /
+            # _ai_fix_with_hints. Locked here, unlocked in _finish_txt_translation.
+            self.table_view.setSortingEnabled(False)
+            self.table_model.set_translation_lock(True)
             self.translation_requested.emit(requests)
 
         except Exception as e:
@@ -3477,6 +3483,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self._set_ui_enabled(True)
         self._is_translating_txt = False
+        self.table_view.setSortingEnabled(True)
+        self.table_model.set_translation_lock(False)
 
         try:
             assert self._txt_target_path is not None
@@ -3591,8 +3599,14 @@ class MainWindow(QMainWindow):
     @Slot(int, int)
     def _on_ollama_finished(self, successful: int, failed: int):
         """Translation batch completed."""
-        self.table_view.setSortingEnabled(True)
-        self.table_model.set_translation_lock(False)
+        # NOTE: sorting is intentionally NOT re-enabled here unconditionally.
+        # This handler re-fires for every self-review retry pass too (each
+        # pass starts its own worker batch), and unlocking here unconditionally
+        # left sorting wide open during those passes -- which _retranslate_with_hints
+        # starts WITHOUT going through _start_translation at all, so it never
+        # re-locked. Re-enabling only happens at the chain's true end:
+        # _announce_batch_complete() (no self-review) or _self_review_finish()
+        # (self-review cycle actually done, not just one pass of it).
         if self._is_translating_txt:
             self._finish_txt_translation(successful, failed)
             return
@@ -3670,7 +3684,16 @@ class MainWindow(QMainWindow):
             self._run_quality_check_silent()
 
     def _announce_batch_complete(self, successful: int, failed: int, msg: str) -> None:
-        """Show the end-of-batch message box and desktop notification."""
+        """Show the end-of-batch message box and desktop notification.
+
+        This is the true end of a translate cycle that did NOT chain into
+        self-review (self-review's own true end is _self_review_finish) --
+        the point where it's finally safe to let the table be re-sorted
+        again, now that no further batch is about to start and misdirect
+        in-flight results to the wrong row.
+        """
+        self.table_view.setSortingEnabled(True)
+        self.table_model.set_translation_lock(False)
         if failed > 0:
             QMessageBox.warning(
                 self,
@@ -4589,8 +4612,16 @@ class MainWindow(QMainWindow):
             self._self_review_finish(remaining=len(critical_rows))
 
     def _self_review_finish(self, remaining: int, stalled: bool = False) -> None:
-        """End the self-review cycle and announce a single consolidated result."""
+        """End the self-review cycle and announce a single consolidated result.
+
+        This -- not _announce_batch_complete -- is the true end of a batch
+        that chained into self-review: _self_review_run_pass can loop through
+        several more _retranslate_with_hints passes before landing here, so
+        sorting must stay locked until we actually arrive at this function.
+        """
         self._self_review_active = False
+        self.table_view.setSortingEnabled(True)
+        self.table_model.set_translation_lock(False)
         self.progress_bar.setVisible(False)
         self._set_ui_enabled(True)
 
@@ -5127,6 +5158,14 @@ class MainWindow(QMainWindow):
         self._set_ui_enabled(False)
         self._eta_start_time = time.monotonic()
         self._eta_batch_total = len(requests)
+        # This is one of several batch-starters that bypass _start_translation
+        # entirely (self-review passes, and manual "retranslate" from the
+        # quality dialog both come through here) -- lock here too, since
+        # _start_translation's own lock doesn't cover this path. Unlocked at
+        # the chain's true end: _announce_batch_complete (no self-review) or
+        # _self_review_finish (self-review cycle actually done).
+        self.table_view.setSortingEnabled(False)
+        self.table_model.set_translation_lock(True)
         self.translation_requested.emit(requests)
         return True
 
@@ -5197,6 +5236,13 @@ class MainWindow(QMainWindow):
         self._set_ui_enabled(False)
         self._eta_start_time = time.monotonic()
         self._eta_batch_total = len(requests)
+        # Same as _retranslate_with_hints — bypasses _start_translation, so
+        # lock here too. Unlocked at _announce_batch_complete /
+        # _self_review_finish (this isn't part of the automatic self-review
+        # chain today, but shares the same completion path via
+        # _on_ollama_finished, so the same unlock points cover it).
+        self.table_view.setSortingEnabled(False)
+        self.table_model.set_translation_lock(True)
         self.translation_requested.emit(requests)
 
     @Slot(int)
