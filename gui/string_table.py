@@ -1195,6 +1195,16 @@ class StringTableView(QTableView):
         if dialog.exec() == QDialog.Accepted:
             new_text = dialog.get_translated_text()
             source_model.set_translated_text(source_row, new_text)
+            # Without this, a fix made through this popup (double-click a
+            # row to open it) never reached the cache: set_translated_text()
+            # alone doesn't emit string_manually_corrected, which is what
+            # main_window.py's _on_string_corrected listens for to write the
+            # correction into the translation cache. The inline in-table
+            # edit path (itemData() above) already emitted this correctly;
+            # this dialog path was simply missing the same line.
+            source_model.string_manually_corrected.emit(
+                source_row, row_data.get("original", "")
+            )
 
     def _open_diff_dialog(self, row):
         """Open the diff viewer for the given table row."""
