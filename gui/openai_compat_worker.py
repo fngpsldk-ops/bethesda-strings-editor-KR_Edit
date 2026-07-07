@@ -90,7 +90,6 @@ class OpenAICompatWorker(QObject):
         self._stop_flag = False
         self._mutex = QMutex()
 
-
         # Compute settings hash once (glossary + prompt version) for cache keys.
         self._settings_hash = self._compute_settings_hash()
 
@@ -221,27 +220,39 @@ class OpenAICompatWorker(QObject):
         success = 0
         errors = 0
 
-        def _translate_one(req):
+        # ── Pre-flight scan (single-threaded — no race condition is possible
+        # here, unlike the earlier lock/Event-based coalescing this replaces) ──
+        # Resolve everything answerable without an API call (skip-type, TM,
+        # cache), and deduplicate the rest: when the same source text appears
+        # multiple times in the batch (a repeated item name, "Chunks (105
+        # Credits)" x50...), only the FIRST occurrence is submitted to the
+        # thread pool; the others are "followers" that never touch a thread
+        # at all and just get the primary's result fanned out to them once
+        # it's ready. Mirrors OllamaWorker.translate_batch's structure, which
+        # already worked this way and inspired this rewrite.
+        pending: list = []          # [(req, source_text, cache_key), ...] — actually dispatched
+        followers: dict = {}        # cache_key -> [follower TranslationRequest, ...]
+
+        for req in requests:
             with QMutexLocker(self._mutex):
                 if self._stop_flag:
-                    return req.index, None, req.string_id
+                    self.finished.emit(0, 0)
+                    return
 
             source_text = req.original_text.replace("\r\n", "\n").replace("\r", "\n")
 
-            # Skip configured string types
             if self.skipped_types:
                 try:
                     from gui.string_type_detector import classify
                     if classify(source_text).name in self.skipped_types:
-                        return req.index, None, req.string_id
+                        done += 1
+                        self.progress.emit(done, total)
+                        continue
                 except Exception:
                     pass
 
             # Translation memory — exact ID hit, then exact source-text hit,
             # then fuzzy match. Same cascade as OllamaWorker / ClaudeTranslationWorker.
-            # Checked before the cache so a freshly-loaded reference translation
-            # (e.g. converted from an existing community 한글패치) always wins,
-            # even if a stale/worse cached entry exists for this text.
             is_retry = bool(req.retry_hint) or bool(req.fix_translation)
             if not is_retry and self.translation_memory:
                 tm_result = self.translation_memory.get_by_id(req.string_id)
@@ -252,21 +263,76 @@ class OpenAICompatWorker(QObject):
                         source_text, max_score=self.tm_fuzzy_max_score
                     )
                 if tm_result is not None:
-                    return req.index, tm_result, req.string_id
+                    self.translation_ready.emit(req.index, tm_result, req.string_id)
+                    success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    continue
 
-            # Cache lookup
-            cache_key = None
-            if self.translation_cache:
-                cache_key = self._make_cache_key(source_text)
+            # Cache lookup. Guarded by is_retry for the exact same reason as
+            # the TM check above: a quality-hint-guided retry exists to get a
+            # DIFFERENT, improved result. The cache stores this worker's own
+            # past output — including whatever got flagged as needing this
+            # retry in the first place — so an unguarded lookup here silently
+            # short-circuits every retry back to the same flawed translation
+            # without ever calling the API again. Confirmed in practice: a
+            # retry_hint-carrying request for already-cached text returned the
+            # stale cached value with zero new API calls.
+            cache_key = self._make_cache_key(source_text)
+            if not is_retry and self.translation_cache:
                 cached = self.translation_cache.get(cache_key)
                 logger.info(
                     "[DIAG] cache lookup string_id=%s key=%s...  hit=%s  cache_len=%d  settings_hash=%s",
                     req.string_id, cache_key[:12], cached is not None, len(self.translation_cache), self._settings_hash,
                 )
                 if cached:
-                    return req.index, cached, req.string_id
+                    self.translation_ready.emit(req.index, cached, req.string_id)
+                    success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    continue
+            elif is_retry:
+                logger.info("[DIAG] cache lookup SKIPPED (is_retry) string_id=%s", req.string_id)
             else:
                 logger.info("[DIAG] cache lookup SKIPPED (self.translation_cache is falsy) string_id=%s", req.string_id)
+
+            # Dedup: retries always go through fresh (matching OllamaWorker).
+            # owns_followers marks whether THIS pending item is the one that
+            # created followers[cache_key] (the first non-retry occurrence).
+            # A retry reuses the same cache_key but must NOT also claim that
+            # followers list -- otherwise, whichever of the primary/retry
+            # completes LAST steals the list and re-fans its own result out
+            # to the primary's followers, silently overwriting what the
+            # primary already delivered them.
+            owns_followers = False
+            if not is_retry:
+                if cache_key in followers:
+                    followers[cache_key].append(req)
+                    continue
+                followers[cache_key] = []
+                owns_followers = True
+
+            pending.append((req, source_text, cache_key, owns_followers))
+
+        if not pending:
+            logger.info(
+                "Batch complete (all %d resolved pre-flight): %d hits",
+                total, success,
+            )
+            self.finished.emit(success, errors)
+            return
+
+        dedup_count = sum(len(v) for v in followers.values())
+        logger.info(
+            "Starting batch: %d total -> %d to API, %d dedup followers",
+            total, len(pending), dedup_count,
+        )
+
+        def _translate_one(item):
+            req, source_text, cache_key, _owns = item
+            with QMutexLocker(self._mutex):
+                if self._stop_flag:
+                    return req.index, None, req.string_id
 
             # Term protection
             protected = source_text
@@ -337,30 +403,40 @@ class OpenAICompatWorker(QObject):
             return req.index, result, req.string_id
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            futures: List[Future] = [pool.submit(_translate_one, req) for req in requests]
-            for fut in as_completed(futures):
+            future_to_item = {pool.submit(_translate_one, item): item for item in pending}
+            for fut in as_completed(future_to_item):
                 with QMutexLocker(self._mutex):
                     stopped = self._stop_flag
                 if stopped:
                     pool.shutdown(wait=False, cancel_futures=True)
                     break
 
+                item_req, _src, item_cache_key, owns_followers = future_to_item[fut]
+                req_followers = followers.get(item_cache_key, []) if owns_followers else []
+
                 try:
                     idx, result, string_id = fut.result()
                 except Exception as exc:
-                    errors += 1
+                    errors += 1 + len(req_followers)
                     self.error.emit(str(exc))
-                    done += 1
+                    done += 1 + len(req_followers)
                     self.progress.emit(done, total)
                     continue
 
                 if result is not None:
                     self.translation_ready.emit(idx, result, string_id)
                     success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    # Fan result out to all dedup followers
+                    for follower in req_followers:
+                        self.translation_ready.emit(follower.index, result, follower.string_id)
+                        success += 1
+                        done += 1
+                        self.progress.emit(done, total)
                 else:
-                    errors += 1
-
-                done += 1
-                self.progress.emit(done, total)
+                    errors += 1 + len(req_followers)
+                    done += 1 + len(req_followers)
+                    self.progress.emit(done, total)
 
         self.finished.emit(success, errors)

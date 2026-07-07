@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import List
 
@@ -108,6 +109,13 @@ class ClaudeTranslationWorker(QObject):
         self._stop_flag = False
         self._mutex = QMutex()
 
+        # Settings hash for cache keys (TranslationCache.make_key). Unlike
+        # OllamaWorker/OpenAICompatWorker, this worker has no
+        # _compute_settings_hash() (no glossary-driven cache invalidation
+        # here yet) — left as "" so the key format still matches theirs
+        # exactly, just without that extra invalidation dimension.
+        self._settings_hash = ""
+
         # Shared client — one connection pool reused across all worker threads.
         # Creating a new ClaudeClient per request was wasteful and broke prompt
         # caching (each new client has a fresh cache-write on the first call).
@@ -142,35 +150,70 @@ class ClaudeTranslationWorker(QObject):
         success = 0
         errors = 0
 
-        def _translate_one(req):
+        # ── Pre-flight scan (single-threaded — mirrors OllamaWorker /
+        # OpenAICompatWorker) ────────────────────────────────────────────────
+        # Resolve everything answerable without an API call (skip-type,
+        # cache, TM), and deduplicate the rest: when the same source text
+        # appears multiple times in the batch, only the first is submitted
+        # to the thread pool; the rest are "followers" that get its result
+        # fanned out to them once it's ready, instead of each independently
+        # calling the API for identical text.
+        from gui.translation_cache import TranslationCache
+
+        pending: list = []
+        followers: dict = {}
+
+        for req in requests:
             with QMutexLocker(self._mutex):
                 if self._stop_flag:
-                    return req.index, None, req.string_id
+                    self.finished.emit(0, 0)
+                    return
 
-            # Normalize CRLF/CR → LF (same as OllamaWorker) before tokenization.
             source_text = req.original_text.replace("\r\n", "\n").replace("\r", "\n")
 
-            # Skip strings whose content type is in the configured skipped list.
             if self.skipped_types:
                 from gui.string_type_detector import classify
                 if classify(source_text).name in self.skipped_types:
-                    return req.index, None, req.string_id
+                    done += 1
+                    self.progress.emit(done, total)
+                    continue
 
-            # Check translation cache (keyed the same way as OllamaWorker's cache)
-            cache_key = None
-            if self.translation_cache:
-                cache_key = hashlib.sha256(
-                    f"{source_text}\x00{self.model}\x00"
-                    f"{self.source_lang}\x00{self.target_lang}".encode()
-                ).hexdigest()
+            # is_retry marks a quality-hint-guided retranslation (see
+            # OllamaWorker/OpenAICompatWorker): the whole point is to get a
+            # DIFFERENT, improved result, so both TM and cache -- which can
+            # only return whatever's already on record, including the exact
+            # flawed translation this retry exists to replace -- must be
+            # skipped for these requests, or the retry silently short-circuits
+            # back to the same broken text with the API never called again.
+            is_retry = bool(req.retry_hint) or bool(req.fix_translation)
+
+            # Check translation cache. Uses TranslationCache.make_key() — the
+            # same format OllamaWorker/OpenAICompatWorker use — instead of the
+            # ad-hoc hash this previously built inline (no settings_hash,
+            # different field order). That mismatch meant a manually-corrected
+            # translation cached via the standard key (e.g. from the string
+            # editor, which writes through TranslationCache.make_key) was
+            # never found by this worker's own lookup.
+            cache_key = TranslationCache.make_key(
+                source_text, self.model, self.source_lang, self.target_lang,
+                self._settings_hash,
+            )
+            if not is_retry and self.translation_cache:
                 cached = self.translation_cache.get(cache_key)
                 if cached:
-                    return req.index, cached, req.string_id
+                    self.translation_ready.emit(req.index, cached, req.string_id)
+                    success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    continue
 
             # Check translation memory — exact ID hit, then exact source-text
             # hit, then fuzzy match. Mirrors OllamaWorker's cascade; TranslationMemory
             # has no .get() method, only get_by_id/get_by_source/get_fuzzy.
-            if hasattr(self, "translation_memory") and self.translation_memory:
+            # Guarded by is_retry (this worker previously had NO such guard,
+            # unlike OllamaWorker/OpenAICompatWorker) for the same reason as
+            # the cache guard above.
+            if not is_retry and hasattr(self, "translation_memory") and self.translation_memory:
                 tm_result = self.translation_memory.get_by_id(req.string_id)
                 if tm_result is None:
                     tm_result = self.translation_memory.get_by_source(source_text)
@@ -179,7 +222,32 @@ class ClaudeTranslationWorker(QObject):
                         source_text, max_score=self.tm_fuzzy_max_score
                     )
                 if tm_result is not None:
-                    return req.index, tm_result, req.string_id
+                    self.translation_ready.emit(req.index, tm_result, req.string_id)
+                    success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    continue
+
+            # Dedup (retries always go through fresh, matching OllamaWorker)
+            owns_followers = False
+            if not is_retry:
+                if cache_key in followers:
+                    followers[cache_key].append(req)
+                    continue
+                followers[cache_key] = []
+                owns_followers = True
+
+            pending.append((req, source_text, cache_key, owns_followers))
+
+        if not pending:
+            self.finished.emit(success, errors)
+            return
+
+        def _translate_one(item):
+            req, source_text, cache_key, _owns = item
+            with QMutexLocker(self._mutex):
+                if self._stop_flag:
+                    return req.index, None, req.string_id
 
             # Term protection
             protected = source_text
@@ -250,42 +318,57 @@ class ClaudeTranslationWorker(QObject):
             # Restore [ dropped by the model when ] was kept
             result = _restore_dropped_opening_brackets(result, req.original_text)
 
-            # Store in cache
+            # Store in cache.
+            # BSEK bug fix: called the nonexistent `.put()` (TranslationCache
+            # only defines `.set()`). Every cache write after a SUCCESSFUL
+            # translation raised AttributeError, which propagated out of this
+            # function uncaught -- the as_completed loop below caught it as a
+            # generic exception and counted the string as FAILED, discarding
+            # the successful translation entirely instead of ever emitting it.
             if cache_key and self.translation_cache:
-                self.translation_cache.put(cache_key, result)
+                self.translation_cache.set(cache_key, result)
 
             return req.index, result, req.string_id
 
         # Parallel API calls — Claude allows concurrent requests
         # Default max_workers=5 is conservative; raise in settings for faster throughput
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            futures: List[Future] = [pool.submit(_translate_one, req) for req in requests]
-            for fut in as_completed(futures):
+            future_to_item = {pool.submit(_translate_one, item): item for item in pending}
+            for fut in as_completed(future_to_item):
                 with QMutexLocker(self._mutex):
                     stopped = self._stop_flag
                 if stopped:
                     pool.shutdown(wait=False, cancel_futures=True)
                     break
 
+                item_req, _src, item_cache_key, owns_followers = future_to_item[fut]
+                req_followers = followers.get(item_cache_key, []) if owns_followers else []
+
                 try:
                     idx, result, string_id = fut.result()
                 except Exception as exc:
-                    errors += 1
+                    errors += 1 + len(req_followers)
                     self.error.emit(str(exc))
-                    done += 1
+                    done += 1 + len(req_followers)
                     self.progress.emit(done, total)
                     continue
 
                 if result is not None:
                     self.translation_ready.emit(idx, result, string_id)
                     success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    for follower in req_followers:
+                        self.translation_ready.emit(follower.index, result, follower.string_id)
+                        success += 1
+                        done += 1
+                        self.progress.emit(done, total)
                 else:
-                    errors += 1
+                    errors += 1 + len(req_followers)
+                    done += 1 + len(req_followers)
                     self.error.emit(
                         self.tr("Translation failed for string index {idx}").format(idx=idx)
                     )
-
-                done += 1
-                self.progress.emit(done, total)
+                    self.progress.emit(done, total)
 
         self.finished.emit(success, errors)
