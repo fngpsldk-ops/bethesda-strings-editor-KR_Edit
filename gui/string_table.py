@@ -753,9 +753,9 @@ class StringTableModel(QAbstractTableModel):
             # reused from something already on record.
             source = row_data.get("translation_source")
             if source == "cache":
-                return QColor("#0EA97E")
+                return QColor("#03593E")
             if source == "api":
-                return QColor("#046949")
+                return QColor("#0C906B")
 
             if (
                 col == 2

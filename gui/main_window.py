@@ -2906,6 +2906,16 @@ class MainWindow(QMainWindow):
             self._audit_log.file_saved(
                 str(self.current_path), self.current_path.suffix.lower(), _count
             )
+            # A successful save means there's nothing left to "recover" --
+            # without this, the crash-recovery snapshot only ever got
+            # cleared on a clean app exit (see closeEvent), so it kept
+            # nagging "restore unsaved work?" on next launch even when the
+            # person had already saved (Save or Save As) and then closed the
+            # app any way other than that one clean-exit path.
+            try:
+                self._recovery_manager.clear()
+            except Exception as exc:
+                logger.warning("Failed to clear recovery snapshot after save: %s", exc)
         except Exception as e:
             logger.error(f"Save failed: {e}", exc_info=True)
             QMessageBox.critical(
@@ -3003,6 +3013,12 @@ class MainWindow(QMainWindow):
             self._audit_log.file_saved(
                 file_path, Path(file_path).suffix.lower(), _count2
             )
+            # See save_file()'s identical block — a successful Save As is
+            # just as much "nothing left to recover" as a plain Save.
+            try:
+                self._recovery_manager.clear()
+            except Exception as exc:
+                logger.warning("Failed to clear recovery snapshot after save: %s", exc)
         except Exception as e:
             logger.error(f"Save failed: {e}", exc_info=True)
             QMessageBox.critical(
