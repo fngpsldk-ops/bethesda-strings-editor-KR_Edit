@@ -7586,10 +7586,19 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         tips = [
+            ("Ctrl+S", self.tr("Save the current file")),
+            ("Ctrl+Shift+S", self.tr("Save As — save to a new file/location")),
+            ("Ctrl+T", self.tr("Translate the selected string(s) with AI")),
+            ("Ctrl+Alt+T", self.tr("Force-retranslate the selected string(s), even if already translated")),
+            ("Ctrl+Shift+A", self.tr("Translate all untranslated strings with AI")),
+            ("Ctrl+Alt+D", self.tr("Apply the selected translation to every identical original string in this file")),
             ("Ctrl+O", self.tr("Open a .strings, .dlstrings, .ilstrings or ESP/ESM file")),
-            ("Ctrl+A", self.tr("Translate all untranslated strings with AI")),
+            ("Ctrl+F", self.tr("Advanced search across the whole file")),
             ("F7",     self.tr("Jump to the next untranslated string")),
+            ("Shift+F7", self.tr("Jump to the previous untranslated string")),
             ("Ctrl+Enter", self.tr("Approve the selected translation")),
+            ("Ctrl+R", self.tr("Reject the selected translation")),
+            ("Ctrl+F7", self.tr("Run a quality check on the current file")),
             ("Ctrl+K", self.tr("Open the command palette to find any action")),
             ("F1",     self.tr("Show all keyboard shortcuts")),
             ("Shift+F1", self.tr("Enter What's This? mode — click any widget for help")),
@@ -7605,7 +7614,7 @@ class MainWindow(QMainWindow):
         for key, desc in tips:
             row = QHBoxLayout()
             key_label = QLabel(f"<code>{key}</code>")
-            key_label.setFixedWidth(120)
+            key_label.setFixedWidth(150)  # was 120 — "Ctrl+Shift+A" is wider than any prior entry
             key_label.setTextFormat(Qt.TextFormat.RichText)
             desc_label = QLabel(desc)
             desc_label.setWordWrap(True)
