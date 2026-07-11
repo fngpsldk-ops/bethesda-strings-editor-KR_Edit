@@ -1949,6 +1949,11 @@ class MainWindow(QMainWindow):
         shortcuts_action.triggered.connect(self._show_shortcuts_dialog)
         help_menu.addAction(shortcuts_action)
 
+        quick_start_action = QAction(self.tr("&Quick-Start Tips…"), self)
+        quick_start_action.setIcon(QIcon.fromTheme("help-hint"))
+        quick_start_action.triggered.connect(self._show_quick_start_tips_dialog)
+        help_menu.addAction(quick_start_action)
+
         help_menu.addSeparator()
 
         check_update_action = QAction(self.tr("Check for &Updates…"), self)
@@ -7573,12 +7578,24 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _show_first_run_tips(self):
-        """Show a one-time tip dialog for first-time users."""
+        """Show the one-time tip dialog for first-time users (gated by
+        settings.tips_shown, so this only ever fires once per install)."""
         if self.settings.tips_shown:
             return
         self.settings.tips_shown = True
         save_settings(self.settings)
+        self._show_quick_start_tips_dialog()
 
+    def _show_quick_start_tips_dialog(self):
+        """Build and show the quick-start tips dialog, unconditionally.
+
+        Split out of _show_first_run_tips() so Help → Quick-Start Tips can
+        re-open it any time — that method's own settings.tips_shown gate
+        means it silently does nothing on every launch after the very first
+        one, which is correct for the automatic startup popup but made the
+        dialog otherwise permanently unreachable once a person had already
+        seen it (e.g. to check it after it was updated with new shortcuts).
+        """
         dlg = QDialog(self)
         dlg.setWindowTitle(self.tr("Welcome to Bethesda Strings AI Translator"))
         dlg.setMinimumWidth(500)

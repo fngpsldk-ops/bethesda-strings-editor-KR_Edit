@@ -1,0 +1,24 @@
+{
+  "weights": {
+    "length_chars": 1.3,
+    "tag_density": 1.3,
+    "multi_printf": 1.0,
+    "false_friends": 1.0,
+    "idioms": 1.0,
+    "ambiguous_pronoun": 1.0,
+    "mixed_script": 1.0,
+    "weird_format": 1.3,
+    "multi_sentence": 1.0
+  },
+  "correction_counts": {
+    "length_chars": 0,
+    "tag_density": 1,
+    "multi_printf": 0,
+    "false_friends": 0,
+    "idioms": 0,
+    "ambiguous_pronoun": 0,
+    "mixed_script": 0,
+    "weird_format": 0,
+    "multi_sentence": 4
+  }
+}

@@ -1,6 +1,6 @@
 {
   "config_version": 36,
-  "backend_type": "ollama",
+  "backend_type": "openai_compat",
   "openai_compat_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
   "openai_compat_model": "gemini-2.5-flash",
   "prompt_persona": "",
@@ -28,7 +28,7 @@
   "color_blind_mode": false,
   "background_enabled": false,
   "background_path": "",
-  "background_opacity": 0.3,
+  "background_opacity": 0.48,
   "background_fit_mode": "cover",
   "check_updates_on_startup": true,
   "last_known_update": "",
@@ -48,7 +48,10 @@
   "nexusmods_file_group_id": "",
   "nexusmods_cookies_file": "",
   "tips_shown": true,
-  "recent_files": [],
+  "recent_files": [
+    "C:/Users/fngps/Documents/2.make/modding/Trans/update/SnuSnuField.esm",
+    "C:/Users/fngps/Documents/2.make/modding/Trans/update/Gallion.esm"
+  ],
   "enable_ai_qc": false,
   "ai_qc_model": "qcgemma4-st",
   "auto_self_review": true,
