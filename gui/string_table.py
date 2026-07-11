@@ -350,8 +350,16 @@ class StringTableModel(QAbstractTableModel):
                 result[i] = estimator.estimate(row.get("original", ""), source_lang)
         self.set_pre_est_data(result)
 
-    def set_translated_text(self, row_index: int, text: str):
+    def set_translated_text(self, row_index: int, text: str, source: Optional[str] = None):
         """Set translated text for a single row.
+
+        *source* records where this translation came from ("tm"/"cache"/"api"/
+        "notrans") for the BackgroundRole color-coding above. Defaults to
+        None, which is correct for the normal callers of this method (manual
+        edits, mechanical auto-fixes, propagate-to-duplicates...) — none of
+        those are "a fresh AI call" or "a cache/TM reuse" in the sense this
+        tracks, so they get no special color (same as TM), not "api" by
+        default.
 
         BSEK bug fix: this used to unconditionally set status="translated"
         even when text is empty (e.g. cleared via the Delete key). An empty
@@ -363,14 +371,21 @@ class StringTableModel(QAbstractTableModel):
         if 0 <= row_index < len(self._data):
             self._data[row_index]["translated"] = text
             self._data[row_index]["status"] = "translated" if text else "pending"
+            self._data[row_index]["translation_source"] = source if text else None
             trans_idx = self.index(row_index, self.COLUMNS.index("Translated"))
             status_idx = self.index(row_index, self.COLUMNS.index("Status"))
-            self.dataChanged.emit(trans_idx, trans_idx, [Qt.DisplayRole, Qt.ForegroundRole])
-            self.dataChanged.emit(status_idx, status_idx, [Qt.DisplayRole, Qt.ForegroundRole])
+            self.dataChanged.emit(trans_idx, trans_idx, [Qt.DisplayRole, Qt.ForegroundRole, Qt.BackgroundRole])
+            self.dataChanged.emit(status_idx, status_idx, [Qt.DisplayRole, Qt.ForegroundRole, Qt.BackgroundRole])
             self._start_flash([row_index])
 
     def set_translated_text_batch(self, updates: list) -> None:
-        """Apply multiple (row_index, text) pairs and emit a single dataChanged range.
+        """Apply multiple translation updates and emit a single dataChanged range.
+
+        Accepts either (row_index, text) or (row_index, text, source) tuples
+        -- source is optional for backward compatibility with the several
+        callers that don't track provenance (propagate-to-duplicates,
+        mechanical auto-fix, patches...); those get source=None, same as a
+        manual edit (see set_translated_text's docstring).
 
         Coalesces N individual dataChanged signals into one covering the full
         dirty range — the view repaints once per 16ms flush instead of once per
@@ -379,10 +394,16 @@ class StringTableModel(QAbstractTableModel):
         if not updates:
             return
         rows_changed = []
-        for row_index, text in updates:
+        for update in updates:
+            if len(update) == 3:
+                row_index, text, source = update
+            else:
+                row_index, text = update
+                source = None
             if 0 <= row_index < len(self._data):
                 self._data[row_index]["translated"] = text
                 self._data[row_index]["status"] = "translated"
+                self._data[row_index]["translation_source"] = source
                 rows_changed.append(row_index)
         if not rows_changed:
             return
@@ -393,7 +414,7 @@ class StringTableModel(QAbstractTableModel):
         self.dataChanged.emit(
             self.index(min_row, first_col),
             self.index(max_row, last_col),
-            [Qt.DisplayRole, Qt.ForegroundRole],
+            [Qt.DisplayRole, Qt.ForegroundRole, Qt.BackgroundRole],
         )
         self._start_flash(rows_changed)
 
@@ -720,6 +741,21 @@ class StringTableModel(QAbstractTableModel):
                 comparison_text = self._diff_data[row_id]
                 if comparison_text != row_data["translated"]:
                     return QColor("#3d3400") if dark else QColor("#fef9c3")
+
+            # Translation source indicator (TM / cache / fresh API call).
+            # TM (and manual edits, and "no translation needed" passthroughs)
+            # deliberately get NO special color here -- they fall through to
+            # whatever lower-priority rule already applies (e.g. the
+            # existing subtle "translated" highlight below), matching how
+            # things already looked before this was added. Only cache hits
+            # and fresh API calls get a distinct color, so it's obvious at a
+            # glance which rows the AI actually spent a fresh call on vs.
+            # reused from something already on record.
+            source = row_data.get("translation_source")
+            if source == "cache":
+                return QColor("#0EA97E")
+            if source == "api":
+                return QColor("#046949")
 
             if (
                 col == 2

@@ -724,7 +724,7 @@ class TranslationRequest:
 class OllamaWorker(QObject):
     """Worker object for AI translation calls with term protection."""
 
-    translation_ready = Signal(int, str, object)  # object avoids signed-int overflow for FormIDs > 0x7FFFFFFF
+    translation_ready = Signal(int, str, object, str)  # object avoids signed-int overflow for FormIDs > 0x7FFFFFFF; str = source "tm"|"cache"|"api"|"notrans"
     progress = Signal(int, int)
     error = Signal(str)
     finished = Signal(int, int)
@@ -1240,7 +1240,7 @@ class OllamaWorker(QObject):
                 )
             )
             if is_notrans:
-                self.translation_ready.emit(req.index, req.original_text, req.string_id)
+                self.translation_ready.emit(req.index, req.original_text, req.string_id, "notrans")
                 successful += 1
                 completed_count += 1
                 self.progress.emit(completed_count, total)
@@ -1255,7 +1255,7 @@ class OllamaWorker(QObject):
                     or self.translation_memory.get_by_source(req.original_text)
                 )
                 if mem_hit:
-                    self.translation_ready.emit(req.index, mem_hit, req.string_id)
+                    self.translation_ready.emit(req.index, mem_hit, req.string_id, "tm")
                     successful += 1
                     completed_count += 1
                     self.progress.emit(completed_count, total)
@@ -1270,7 +1270,7 @@ class OllamaWorker(QObject):
                 cached = self.translation_cache.get(cache_key)
                 if cached:
                     cached = self._heal_known_artifacts(cached, req.original_text)
-                    self.translation_ready.emit(req.index, cached, req.string_id)
+                    self.translation_ready.emit(req.index, cached, req.string_id, "cache")
                     successful += 1
                     completed_count += 1
                     self.progress.emit(completed_count, total)
@@ -1396,14 +1396,14 @@ class OllamaWorker(QObject):
                         # A real completion clears the wedged-backend run counter.
                         with QMutexLocker(self._mutex):
                             self._consecutive_timeouts = 0
-                        self.translation_ready.emit(req.index, translated, req.string_id)
+                        self.translation_ready.emit(req.index, translated, req.string_id, "api")
                         successful += 1
                         completed_count += 1
                         self.progress.emit(completed_count, total)
                         # Fan result out to all dedup followers
                         for follower in req_followers:
                             self.translation_ready.emit(
-                                follower.index, translated, follower.string_id
+                                follower.index, translated, follower.string_id, "api"
                             )
                             successful += 1
                             completed_count += 1

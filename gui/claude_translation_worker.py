@@ -70,7 +70,7 @@ class ClaudeTranslationWorker(QObject):
     translate_batch() calls via QueuedConnection, exactly like OllamaWorker.
     """
 
-    translation_ready = Signal(int, str, object)  # object avoids signed-int overflow for FormIDs > 0x7FFFFFFF
+    translation_ready = Signal(int, str, object, str)  # (index, text, string_id, source: "tm"|"cache"|"api")
     progress = Signal(int, int)
     error = Signal(str)
     finished = Signal(int, int)
@@ -201,7 +201,7 @@ class ClaudeTranslationWorker(QObject):
             if not is_retry and self.translation_cache:
                 cached = self.translation_cache.get(cache_key)
                 if cached:
-                    self.translation_ready.emit(req.index, cached, req.string_id)
+                    self.translation_ready.emit(req.index, cached, req.string_id, "cache")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
@@ -222,7 +222,7 @@ class ClaudeTranslationWorker(QObject):
                         source_text, max_score=self.tm_fuzzy_max_score
                     )
                 if tm_result is not None:
-                    self.translation_ready.emit(req.index, tm_result, req.string_id)
+                    self.translation_ready.emit(req.index, tm_result, req.string_id, "tm")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
@@ -354,12 +354,12 @@ class ClaudeTranslationWorker(QObject):
                     continue
 
                 if result is not None:
-                    self.translation_ready.emit(idx, result, string_id)
+                    self.translation_ready.emit(idx, result, string_id, "api")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
                     for follower in req_followers:
-                        self.translation_ready.emit(follower.index, result, follower.string_id)
+                        self.translation_ready.emit(follower.index, result, follower.string_id, "api")
                         success += 1
                         done += 1
                         self.progress.emit(done, total)

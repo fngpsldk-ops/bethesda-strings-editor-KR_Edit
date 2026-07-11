@@ -46,7 +46,7 @@ class OpenAICompatWorker(QObject):
         finished(success:int, errors:int)
     """
 
-    translation_ready = Signal(int, str, object)
+    translation_ready = Signal(int, str, object, str)  # (index, text, string_id, source: "tm"|"cache"|"api")
     progress = Signal(int, int)
     error = Signal(str)
     finished = Signal(int, int)
@@ -263,7 +263,7 @@ class OpenAICompatWorker(QObject):
                         source_text, max_score=self.tm_fuzzy_max_score
                     )
                 if tm_result is not None:
-                    self.translation_ready.emit(req.index, tm_result, req.string_id)
+                    self.translation_ready.emit(req.index, tm_result, req.string_id, "tm")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
@@ -286,7 +286,7 @@ class OpenAICompatWorker(QObject):
                     req.string_id, cache_key[:12], cached is not None, len(self.translation_cache), self._settings_hash,
                 )
                 if cached:
-                    self.translation_ready.emit(req.index, cached, req.string_id)
+                    self.translation_ready.emit(req.index, cached, req.string_id, "cache")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
@@ -424,13 +424,14 @@ class OpenAICompatWorker(QObject):
                     continue
 
                 if result is not None:
-                    self.translation_ready.emit(idx, result, string_id)
+                    self.translation_ready.emit(idx, result, string_id, "api")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
-                    # Fan result out to all dedup followers
+                    # Fan result out to all dedup followers — same call, so
+                    # still "api" (not a separate TM/cache source).
                     for follower in req_followers:
-                        self.translation_ready.emit(follower.index, result, follower.string_id)
+                        self.translation_ready.emit(follower.index, result, follower.string_id, "api")
                         success += 1
                         done += 1
                         self.progress.emit(done, total)

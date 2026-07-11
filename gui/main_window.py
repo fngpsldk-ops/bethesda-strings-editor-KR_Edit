@@ -3230,6 +3230,12 @@ class MainWindow(QMainWindow):
         # batch (all the early-return checks above have already passed).
         self.table_view.setSortingEnabled(False)
         self.table_model.set_translation_lock(True)
+        # Reset the per-source (TM/cache/API) counters here, at the true
+        # start of a user-initiated translate action -- NOT in
+        # _retranslate_with_hints/_ai_fix_with_hints, which are continuations
+        # of THIS action (self-review passes), so counts accumulate across
+        # the whole chain and get reported once at the true end.
+        self._batch_source_counts = {"tm": 0, "cache": 0, "api": 0, "notrans": 0}
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, len(requests))
         self.progress_bar.setValue(0)
@@ -3450,6 +3456,7 @@ class MainWindow(QMainWindow):
 
             self._is_translating_txt = True
             self._txt_target_path = target_path
+            self._batch_source_counts = {"tm": 0, "cache": 0, "api": 0, "notrans": 0}
 
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, len(requests))
@@ -3512,6 +3519,11 @@ class MainWindow(QMainWindow):
             )
             if failed > 0:
                 msg += self.tr(", {count} failed").format(count=failed)
+            counts = getattr(self, "_batch_source_counts", None)
+            if counts and sum(counts.values()) > 0:
+                msg += self.tr(
+                    "\n(TM: {tm}, Cache: {cache}, API: {api})"
+                ).format(tm=counts.get("tm", 0), cache=counts.get("cache", 0), api=counts.get("api", 0))
             QMessageBox.information(self, self.tr("Success"), msg)
             self.statusBar().showMessage(msg, 10000)
             send_notification(
@@ -3565,11 +3577,14 @@ class MainWindow(QMainWindow):
         )
 
     @Slot(int, str, int)
-    def _on_translation_ready(self, index: int, translated: str, string_id: int):
+    def _on_translation_ready(self, index: int, translated: str, string_id: int, source: str = "api"):
         """Buffer translated string; flushed to the model at 60fps by the timer."""
         if self._translation_stopping:
             return
-        self._pending_translation_updates.append((index, translated, self._is_translating_txt))
+        if not hasattr(self, "_batch_source_counts"):
+            self._batch_source_counts = {"tm": 0, "cache": 0, "api": 0, "notrans": 0}
+        self._batch_source_counts[source] = self._batch_source_counts.get(source, 0) + 1
+        self._pending_translation_updates.append((index, translated, self._is_translating_txt, source))
 
     def _flush_translation_updates(self):
         """Apply all buffered translation results to the model in one batch."""
@@ -3578,8 +3593,8 @@ class MainWindow(QMainWindow):
         updates = self._pending_translation_updates
         self._pending_translation_updates = []
 
-        txt_updates = [(i, t) for i, t, is_txt in updates if is_txt]
-        model_updates = [(i, t) for i, t, is_txt in updates if not is_txt]
+        txt_updates = [(i, t) for i, t, is_txt, _src in updates if is_txt]
+        model_updates = [(i, t, src) for i, t, is_txt, src in updates if not is_txt]
 
         for index, translated in txt_updates:
             if 0 <= index < len(self._translatable_items):
@@ -3661,6 +3676,11 @@ class MainWindow(QMainWindow):
         msg = self.tr("Complete: {count} successful").format(count=successful)
         if failed > 0:
             msg += self.tr(", {count} failed").format(count=failed)
+        counts = getattr(self, "_batch_source_counts", None)
+        if counts and sum(counts.values()) > 0:
+            msg += self.tr(
+                "\n(TM: {tm}, Cache: {cache}, API: {api})"
+            ).format(tm=counts.get("tm", 0), cache=counts.get("cache", 0), api=counts.get("api", 0))
         self.statusBar().showMessage(msg, 10000)
 
         self.translation_complete.emit(successful, failed)
@@ -4630,6 +4650,13 @@ class MainWindow(QMainWindow):
         retr = self._self_review_retranslated
 
         parts: list = [self.tr("{n} string(s) translated.").format(n=init_ok)]
+        counts = getattr(self, "_batch_source_counts", None)
+        if counts and sum(counts.values()) > 0:
+            parts.append(
+                self.tr("(TM: {tm}, Cache: {cache}, API: {api})").format(
+                    tm=counts.get("tm", 0), cache=counts.get("cache", 0), api=counts.get("api", 0)
+                )
+            )
         if mech:
             parts.append(
                 self.tr("Auto-fixed {n} issue(s) mechanically.").format(n=mech)
