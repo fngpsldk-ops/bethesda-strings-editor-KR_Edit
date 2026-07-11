@@ -7578,12 +7578,14 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _show_first_run_tips(self):
-        """Show the one-time tip dialog for first-time users (gated by
-        settings.tips_shown, so this only ever fires once per install)."""
-        if self.settings.tips_shown:
-            return
-        self.settings.tips_shown = True
-        save_settings(self.settings)
+        """Show the quick-start tips dialog on every launch.
+
+        Previously gated by settings.tips_shown so it only ever fired once
+        per install — changed to always show per explicit request. The
+        settings.tips_shown field and the Help > Quick-Start Tips… menu
+        item (which calls _show_quick_start_tips_dialog directly) are left
+        as-is; this just stops consulting the gate here.
+        """
         self._show_quick_start_tips_dialog()
 
     def _show_quick_start_tips_dialog(self):
