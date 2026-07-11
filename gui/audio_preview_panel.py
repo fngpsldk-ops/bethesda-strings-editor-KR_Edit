@@ -591,7 +591,7 @@ class AudioPreviewPanel(QDockWidget):
         # String info header
         id_str = f"0x{string_id:08X}" if string_id >= 0 else "—"
         preview = original[:80] + ("…" if len(original) > 80 else "")
-        self._info_label.setText("ID " + id_str + "  “" + preview + "”")
+        self._info_label.setText(self.tr("ID ") + id_str + "  “" + preview + "”")
 
         self._synth_btn.setEnabled(bool(translated))
 

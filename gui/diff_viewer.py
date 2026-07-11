@@ -432,8 +432,8 @@ class DiffViewerDialog(QDialog):
         toolbar.setSpacing(6)
 
         # String navigation
-        self._btn_prev_row = QPushButton("◀ Prev")
-        self._btn_prev_row.setToolTip("Go to previous string (Ctrl+Left)")
+        self._btn_prev_row = QPushButton(self.tr("◀ Prev"))
+        self._btn_prev_row.setToolTip(self.tr("Go to previous string (Ctrl+Left)"))
         self._btn_prev_row.setShortcut("Ctrl+Left")
         self._btn_prev_row.clicked.connect(self._go_prev_row)
 
@@ -442,23 +442,23 @@ class DiffViewerDialog(QDialog):
         self._lbl_position.setMinimumWidth(100)
         self._lbl_position.setStyleSheet("font-weight: bold;")
 
-        self._btn_next_row = QPushButton("Next ▶")
-        self._btn_next_row.setToolTip("Go to next string (Ctrl+Right)")
+        self._btn_next_row = QPushButton(self.tr("Next ▶"))
+        self._btn_next_row.setToolTip(self.tr("Go to next string (Ctrl+Right)"))
         self._btn_next_row.setShortcut("Ctrl+Right")
         self._btn_next_row.clicked.connect(self._go_next_row)
 
         # Changed-only filter
-        self._chk_changed_only = QCheckBox("Changed only")
-        self._chk_changed_only.setToolTip("Navigate only between strings with differences")
+        self._chk_changed_only = QCheckBox(self.tr("Changed only"))
+        self._chk_changed_only.setToolTip(self.tr("Navigate only between strings with differences"))
         self._chk_changed_only.toggled.connect(self._refresh_nav_state)
 
         sep1 = _make_vsep()
 
         # Granularity
-        lbl_gran = QLabel("Granularity:")
+        lbl_gran = QLabel(self.tr("Granularity:"))
         self._combo_gran = QComboBox()
-        self._combo_gran.addItem("Word", "word")
-        self._combo_gran.addItem("Character", "char")
+        self._combo_gran.addItem(self.tr("Word"), "word")
+        self._combo_gran.addItem(self.tr("Character"), "char")
         default_idx = 1 if self._comparison_data is None else 0
         self._combo_gran.setCurrentIndex(default_idx)
         self._combo_gran.currentIndexChanged.connect(self._on_granularity_changed)
@@ -466,8 +466,8 @@ class DiffViewerDialog(QDialog):
         sep2 = _make_vsep()
 
         # Segment navigation
-        self._btn_prev_seg = QPushButton("↑ Prev change")
-        self._btn_prev_seg.setToolTip("Jump to previous changed segment (Alt+Up)")
+        self._btn_prev_seg = QPushButton(self.tr("↑ Prev change"))
+        self._btn_prev_seg.setToolTip(self.tr("Jump to previous changed segment (Alt+Up)"))
         self._btn_prev_seg.setShortcut("Alt+Up")
         self._btn_prev_seg.clicked.connect(self._go_prev_segment)
 
@@ -475,8 +475,8 @@ class DiffViewerDialog(QDialog):
         self._lbl_seg_nav.setAlignment(Qt.AlignCenter)
         self._lbl_seg_nav.setMinimumWidth(80)
 
-        self._btn_next_seg = QPushButton("↓ Next change")
-        self._btn_next_seg.setToolTip("Jump to next changed segment (Alt+Down)")
+        self._btn_next_seg = QPushButton(self.tr("↓ Next change"))
+        self._btn_next_seg.setToolTip(self.tr("Jump to next changed segment (Alt+Down)"))
         self._btn_next_seg.setShortcut("Alt+Down")
         self._btn_next_seg.clicked.connect(self._go_next_segment)
 
@@ -550,15 +550,15 @@ class DiffViewerDialog(QDialog):
         # ── Bottom buttons ─────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
 
-        self._btn_export = QPushButton("Export HTML Report…")
+        self._btn_export = QPushButton(self.tr("Export HTML Report…"))
         self._btn_export.clicked.connect(self._export_html)
 
-        self._btn_ok = QPushButton("Save && Close")
+        self._btn_ok = QPushButton(self.tr("Save && Close"))
         self._btn_ok.setProperty("primary", True)
         self._btn_ok.setDefault(True)
         self._btn_ok.clicked.connect(self._save_and_accept)
 
-        btn_cancel = QPushButton("Close")
+        btn_cancel = QPushButton(self.tr("Close"))
         btn_cancel.clicked.connect(self.reject)
 
         btn_row.addWidget(self._btn_export)
@@ -583,15 +583,21 @@ class DiffViewerDialog(QDialog):
 
         if self._comparison_data is not None:
             left_text = self._comparison_data.get(string_id, "")
-            self._lbl_left_header.setText("Comparison File")
-            self._lbl_right_header.setText(f"Current Translation — {self._target_lang}  (editable)")
+            self._lbl_left_header.setText(self.tr("Comparison File"))
+            self._lbl_right_header.setText(
+                self.tr("Current Translation — {lang}  (editable)").format(lang=self._target_lang)
+            )
         else:
             left_text = original
-            self._lbl_left_header.setText(f"Original Source — {self._source_lang}")
-            self._lbl_right_header.setText(f"Translation — {self._target_lang}  (editable)")
+            self._lbl_left_header.setText(
+                self.tr("Original Source — {lang}").format(lang=self._source_lang)
+            )
+            self._lbl_right_header.setText(
+                self.tr("Translation — {lang}  (editable)").format(lang=self._target_lang)
+            )
 
         self._left_text = left_text
-        self._lbl_id.setText(f"ID: 0x{string_id:08X}")
+        self._lbl_id.setText(self.tr("ID: 0x{id:08X}").format(id=string_id))
 
         # Load right pane text without triggering diff (block temporarily)
         self._updating_format = True
@@ -628,7 +634,7 @@ class DiffViewerDialog(QDialog):
         # ── Segment nav label ──────────────────────────────────────────────────
         n = len(self._segments)
         if n == 0:
-            self._lbl_seg_nav.setText("No changes")
+            self._lbl_seg_nav.setText(self.tr("No changes"))
         else:
             self._lbl_seg_nav.setText(f"0 / {n}")
 

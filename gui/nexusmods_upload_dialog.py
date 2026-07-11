@@ -106,7 +106,7 @@ class _UploadWorker(QThread):
         except NexusModsError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:
-            self.failed.emit(f"Unexpected error: {exc}")
+            self.failed.emit(self.tr("Unexpected error: {error}").format(error=exc))
 
 
 class NexusModsUploadDialog(QDialog):
@@ -120,7 +120,7 @@ class NexusModsUploadDialog(QDialog):
         initial_file: Optional[Path] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Upload to NexusMods")
+        self.setWindowTitle(self.tr("Upload to NexusMods"))
         self.setMinimumWidth(540)
         self._settings = settings
         self._worker: Optional[_UploadWorker] = None
@@ -140,7 +140,7 @@ class NexusModsUploadDialog(QDialog):
         root.addWidget(self._make_progress_group())
 
         buttons = QDialogButtonBox()
-        self._upload_btn = buttons.addButton("Upload", QDialogButtonBox.ActionRole)
+        self._upload_btn = buttons.addButton(self.tr("Upload"), QDialogButtonBox.ActionRole)
         self._upload_btn.setDefault(True)
         self._close_btn = buttons.addButton(QDialogButtonBox.Close)
         self._upload_btn.clicked.connect(self._start_upload)
@@ -148,7 +148,7 @@ class NexusModsUploadDialog(QDialog):
         root.addWidget(buttons)
 
     def _make_auth_group(self) -> QGroupBox:
-        box = QGroupBox("Authentication")
+        box = QGroupBox(self.tr("Authentication"))
         layout = QFormLayout(box)
 
         row = QWidget()
@@ -156,8 +156,8 @@ class NexusModsUploadDialog(QDialog):
         h.setContentsMargins(0, 0, 0, 0)
         self._key_edit = QLineEdit()
         self._key_edit.setEchoMode(QLineEdit.PasswordEchoOnEdit)
-        self._key_edit.setPlaceholderText("Paste your NexusMods API key…")
-        toggle = QPushButton("Show")
+        self._key_edit.setPlaceholderText(self.tr("Paste your NexusMods API key…"))
+        toggle = QPushButton(self.tr("Show"))
         toggle.setCheckable(True)
         toggle.setFixedWidth(54)
         toggle.toggled.connect(
@@ -165,22 +165,22 @@ class NexusModsUploadDialog(QDialog):
                 self._key_edit.setEchoMode(
                     QLineEdit.Normal if on else QLineEdit.PasswordEchoOnEdit
                 ),
-                toggle.setText("Hide" if on else "Show"),
+                toggle.setText(self.tr("Hide") if on else self.tr("Show")),
             )
         )
         h.addWidget(self._key_edit)
         h.addWidget(toggle)
-        layout.addRow("API key:", row)
+        layout.addRow(self.tr("API key:"), row)
 
         note = QLabel(
-            '<a href="https://www.nexusmods.com/users/myaccount?tab=api">Get your API key</a>'
+            f'<a href="https://www.nexusmods.com/users/myaccount?tab=api">{self.tr("Get your API key")}</a>'
         )
         note.setOpenExternalLinks(True)
         layout.addRow("", note)
         return box
 
     def _make_file_group(self, initial_file: Optional[Path]) -> QGroupBox:
-        box = QGroupBox("File to upload")
+        box = QGroupBox(self.tr("File to upload"))
         layout = QFormLayout(box)
 
         row = QWidget()
@@ -189,63 +189,63 @@ class NexusModsUploadDialog(QDialog):
         self._file_edit = QLineEdit()
         if initial_file:
             self._file_edit.setText(str(initial_file))
-        browse = QPushButton("Browse…")
+        browse = QPushButton(self.tr("Browse…"))
         browse.setFixedWidth(72)
         browse.clicked.connect(self._browse_file)
         h.addWidget(self._file_edit)
         h.addWidget(browse)
-        layout.addRow("Path:", row)
+        layout.addRow(self.tr("Path:"), row)
 
         self._group_edit = QLineEdit()
-        self._group_edit.setPlaceholderText("e.g. 12345")
-        layout.addRow("File group ID:", self._group_edit)
+        self._group_edit.setPlaceholderText(self.tr("e.g. 12345"))
+        layout.addRow(self.tr("File group ID:"), self._group_edit)
 
-        note = QLabel("Find on your mod page: Files → ⋯ → API Info")
+        note = QLabel(self.tr("Find on your mod page: Files → ⋯ → API Info"))
         note.setStyleSheet("color: gray; font-size: 11px;")
         layout.addRow("", note)
         return box
 
     def _make_meta_group(self) -> QGroupBox:
-        box = QGroupBox("Metadata")
+        box = QGroupBox(self.tr("Metadata"))
         layout = QFormLayout(box)
 
         self._version_edit = QLineEdit(_read_version())
-        layout.addRow("Version:", self._version_edit)
+        layout.addRow(self.tr("Version:"), self._version_edit)
 
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Display name shown on the mod page")
-        layout.addRow("Display name:", self._name_edit)
+        self._name_edit.setPlaceholderText(self.tr("Display name shown on the mod page"))
+        layout.addRow(self.tr("Display name:"), self._name_edit)
 
         self._desc_edit = QPlainTextEdit()
-        self._desc_edit.setPlaceholderText("Optional description (HTML supported)")
+        self._desc_edit.setPlaceholderText(self.tr("Optional description (HTML supported)"))
         self._desc_edit.setFixedHeight(72)
-        layout.addRow("Description:", self._desc_edit)
+        layout.addRow(self.tr("Description:"), self._desc_edit)
 
         self._cat_combo = QComboBox()
         for label, code in _FILE_CATEGORIES:
-            self._cat_combo.addItem(label, code)
-        layout.addRow("Category:", self._cat_combo)
+            self._cat_combo.addItem(self.tr(label), code)
+        layout.addRow(self.tr("Category:"), self._cat_combo)
 
-        self._archive_chk = QCheckBox("Archive previous version of this file")
+        self._archive_chk = QCheckBox(self.tr("Archive previous version of this file"))
         self._archive_chk.setChecked(True)
         layout.addRow("", self._archive_chk)
 
-        self._allow_manager_chk = QCheckBox("Allow mod manager download")
+        self._allow_manager_chk = QCheckBox(self.tr("Allow mod manager download"))
         self._allow_manager_chk.setChecked(True)
         layout.addRow("", self._allow_manager_chk)
 
-        self._primary_chk = QCheckBox("Set as primary mod manager download")
+        self._primary_chk = QCheckBox(self.tr("Set as primary mod manager download"))
         layout.addRow("", self._primary_chk)
 
         return box
 
     def _make_progress_group(self) -> QGroupBox:
-        box = QGroupBox("Progress")
+        box = QGroupBox(self.tr("Progress"))
         v = QVBoxLayout(box)
         self._progress_bar = QProgressBar()
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
-        self._status_lbl = QLabel("Ready.")
+        self._status_lbl = QLabel(self.tr("Ready."))
         self._status_lbl.setWordWrap(True)
         v.addWidget(self._progress_bar)
         v.addWidget(self._status_lbl)
@@ -277,9 +277,9 @@ class NexusModsUploadDialog(QDialog):
     def _browse_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select file to upload",
+            self.tr("Select file to upload"),
             str(Path(self._file_edit.text()).parent) if self._file_edit.text() else "",
-            "Archives (*.zip *.7z *.rar);;All files (*)",
+            self.tr("Archives (*.zip *.7z *.rar);;All files (*)"),
         )
         if path:
             self._file_edit.setText(path)
@@ -296,13 +296,13 @@ class NexusModsUploadDialog(QDialog):
         # Validate
         errors = []
         if not api_key:
-            errors.append("API key is required.")
+            errors.append(self.tr("API key is required."))
         if not file_path.name or not file_path.exists():
-            errors.append("File to upload does not exist.")
+            errors.append(self.tr("File to upload does not exist."))
         if not group_id:
-            errors.append("File group ID is required.")
+            errors.append(self.tr("File group ID is required."))
         if not version:
-            errors.append("Version is required.")
+            errors.append(self.tr("Version is required."))
         if errors:
             self._status_lbl.setText("⚠ " + "  ".join(errors))
             return
@@ -340,7 +340,9 @@ class NexusModsUploadDialog(QDialog):
     def _on_success(self, file_uid: str) -> None:
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(100)
-        self._status_lbl.setText(f"✓ Upload complete. NexusMods file UID: {file_uid}")
+        self._status_lbl.setText(
+            "✓ " + self.tr("Upload complete. NexusMods file UID: {uid}").format(uid=file_uid)
+        )
         self._set_uploading(False)
 
     def _on_error(self, message: str) -> None:

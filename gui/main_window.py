@@ -426,7 +426,7 @@ class _DropOverlay(QWidget):
         fade_in_overlay(self)
 
     def show_invalid(self) -> None:
-        self._headline.setText("Unsupported file type")
+        self._headline.setText(self.tr("Unsupported file type"))
         self._apply_style(valid=False)
         self.raise_()
         self.show()
@@ -7457,7 +7457,7 @@ class MainWindow(QMainWindow):
             lambda: QMessageBox.information(
                 self,
                 self.tr("Up to Date"),
-                self.tr(f"You are already running the latest version ({ver})."),
+                self.tr("You are already running the latest version ({ver}).").format(ver=ver),
             )
         )
         self._update_checker.check_failed.connect(
@@ -7736,7 +7736,7 @@ class _TermDiscoveryDialog(QDialog):
 
         self._populate_table(self._candidates)
 
-        count_label = QLabel(self.tr(f"{len(self._candidates)} candidates found"))
+        count_label = QLabel(self.tr("{n} candidates found").format(n=len(self._candidates)))
         self._count_label = count_label
         layout.addWidget(count_label)
 

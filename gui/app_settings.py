@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QSettings
 
 logger = logging.getLogger(__name__)
 
@@ -244,11 +244,19 @@ class AppSettings:
 
         # Ollama URL validation
         if not self.ollama_url:
-            errors.append("Ollama URL cannot be empty")
+            errors.append(QCoreApplication.translate("AppSettings", "Ollama URL cannot be empty"))
         elif len(self.ollama_url) < self._URL_MIN_LENGTH:
-            errors.append(f"Ollama URL too short (min {self._URL_MIN_LENGTH} chars)")
+            errors.append(
+                QCoreApplication.translate(
+                    "AppSettings", "Ollama URL too short (min {n} chars)"
+                ).format(n=self._URL_MIN_LENGTH)
+            )
         elif not self.ollama_url.startswith(("http://", "https://")):
-            errors.append("Ollama URL must start with http:// or https://")
+            errors.append(
+                QCoreApplication.translate(
+                    "AppSettings", "Ollama URL must start with http:// or https://"
+                )
+            )
 
         # Quality range
         if not (self._QUALITY_MIN <= self.quality_level <= self._QUALITY_MAX):
