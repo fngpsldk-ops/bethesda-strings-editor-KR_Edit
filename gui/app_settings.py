@@ -489,6 +489,25 @@ def _platform_config_home() -> Path:
     return Path(xdg) if xdg else Path(os.path.expanduser("~/.config"))
 
 
+def _get_app_base_dir() -> Path:
+    """Directory the running app lives in — the .exe's folder for a frozen
+    (PyInstaller) build, or the entry script's folder when run from source."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(sys.argv[0]).resolve().parent
+
+
+# Portable mode: if a folder named "PortableData" sits next to the app
+# (either shipped as part of a distribution, or created by hand), config AND
+# cache live there instead of the OS-native per-user directory below. This
+# is checked but never auto-created — an existing install with no such
+# folder keeps using %APPDATA% exactly as before, so this is opt-in per copy
+# of the app, not a behavior change for anyone who doesn't create the folder.
+# To make a distribution portable: create an empty "PortableData" folder
+# next to the .exe before handing it out.
+_PORTABLE_DATA_DIR = _get_app_base_dir() / "PortableData"
+
+
 # Default config directory — OS-native location.
 _DEFAULT_CONFIG_DIR = _platform_config_home() / "BethesdaModTools"
 # Long-standing pre-cross-platform location (always ~/.config). Used to migrate
@@ -562,7 +581,11 @@ def _migrate_legacy_config_dir() -> None:
 
 
 def get_config_dir() -> Path:
-    """Get the directory where the JSON config file is stored."""
+    """Get the directory where the JSON config file is stored.
+
+    Priority: BSE_CONFIG_DIR env var / bootstrap override → PortableData
+    folder next to the app (see _PORTABLE_DATA_DIR) → OS-native default.
+    """
     override = get_config_dir_override()
     if override:
         try:
@@ -570,6 +593,13 @@ def get_config_dir() -> Path:
             return override
         except OSError as e:
             logger.warning("Cannot use config dir override %s: %s — using default", override, e)
+    if _PORTABLE_DATA_DIR.exists():
+        try:
+            config_subdir = _PORTABLE_DATA_DIR / "Config"
+            config_subdir.mkdir(parents=True, exist_ok=True)
+            return config_subdir
+        except OSError as e:
+            logger.warning("Cannot use portable config dir %s: %s — using default", _PORTABLE_DATA_DIR, e)
     _migrate_legacy_config_dir()
     _DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     return _DEFAULT_CONFIG_DIR
