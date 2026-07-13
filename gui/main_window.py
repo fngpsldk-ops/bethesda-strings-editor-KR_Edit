@@ -464,6 +464,30 @@ class _DropOverlay(QWidget):
 # upstream 0xra0/bethesda-strings-editor project, not this fork). Update this
 # by hand when a new BSEK release is tagged.
 _BSEK_CHANGELOG_HTML = """
+<h3 style="margin:0 0 6px 0;">v1.1.0_KR &middot; 2026-07-14</h3>
+<p style="margin:0 0 10px 0; opacity:0.75;">
+실제 모드 파일을 반복 번역해보며 드러난 문제들을 진단·수정하고, 자주 쓰는
+워크플로를 더 편하게 만든 업데이트입니다.
+</p>
+<ul style="margin:0 0 10px 18px; padding:0;">
+  <li><b>번역 메모리(TM) 속도/정확도</b> &mdash; 조회 속도 약 45배 개선.
+      짧은 단어/문구가 문맥과 무관한 다른 항목과 잘못 매칭되던 문제
+      다수 수정 (<code>ON</code>/<code>OFF</code> 등 극단적으로 짧은
+      단어 포함).</li>
+  <li><b>버그 수정</b> &mdash; 애니메이션 리소스 경로를 텍스트로 착각해
+      번역하던 문제, 손으로 고친 번역이 캐시에 저장 안 되던 문제(특히
+      더블클릭 편집창), 품질 검토 후 재번역이 캐시 때문에 무력화되던
+      문제, 클라우드 API 요청 제한(429) 시 재시도 없이 실패하던 문제,
+      번역 중 표 정렬로 결과가 엉뚱한 행에 들어가던 문제, 저장 후에도
+      복원 팝업이 계속 뜨던 문제 등 다수 수정.</li>
+  <li><b>신규 기능</b> &mdash; 강제 재번역(<code>Ctrl+Alt+T</code>),
+      동일 원문 일괄 적용(<code>Ctrl+Alt+D</code>), Translation Memory
+      뷰어, 번역 출처(TM/캐시/API) 색상 표시, 문자열 목록 열 정렬,
+      포터블 배포 지원(<code>PortableData</code> 폴더).</li>
+  <li><b>현지화 완성</b> &mdash; 메뉴/대화상자에 남아있던 영어 문구를
+      전부 한국어로 번역 (파일 비교 창, NexusMods 업로드 창 등).</li>
+</ul>
+
 <h3 style="margin:0 0 6px 0;">v1.0.0_KR &middot; 2026-07-02</h3>
 <p style="margin:0 0 10px 0; opacity:0.75;">
 BSEK (Bethesda Strings Editor &mdash; Korean Edition)&nbsp;&mdash;
