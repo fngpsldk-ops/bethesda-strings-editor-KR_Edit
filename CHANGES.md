@@ -224,6 +224,150 @@ API 키만 입력하면 됨 — 별도 프록시 서버 실행 불필요.
 
 ---
 
+## 3차 세션: TM 정확도/성능, 동시성 버그, 신규 워크플로 기능, 현지화 완성
+
+이번 세션은 실제 모드 파일(rbt_RealFuel_RE, rbt_RealO2, du_overtime, EAA_TAFightOrFlight,
+H0LZPOIExpansion 등)을 반복적으로 번역해보면서 드러난 문제를 하나씩 재현 →
+근본 원인 진단 → 수정 → 실제 데이터로 검증하는 방식으로 진행했습니다.
+
+### Translation Memory 정확도 (여러 차례에 걸친 수정)
+
+`gui/translation_memory.py`:
+- **성능**: `get_fuzzy()`가 조회마다 전체 코퍼스(17만+ 항목)를 선형 스캔 →
+  단어 단위 역색인(inverted index) 도입, 원문과 공유 단어가 있는 후보만 채점.
+  3~10초 → ~70ms (약 45배 개선). 기존 결과와 100% 동일함을 다수 쿼리로 회귀 검증.
+- **짧은 문자열 오매칭 (1차)**: `"The Fuel Box"`가 무관한 `"Play the music box"`와
+  퍼지 매칭됨 (공유 단어가 "the"/"box"뿐인데도 통과). 8단어 이하 문자열은
+  원문-후보 단어가 양방향 85% 이상 겹쳐야만 재사용하도록 게이트 추가.
+- **짧은 문자열 오매칭 (2차)**: `get_by_source()`(완전 일치 경로)에는 이 게이트가
+  없어서 `"OFF"`→`실탄 중량 없음`, `on"`→`"대상:"` 같은 문맥 무관 완전 일치가
+  그대로 통과됨. `on`/`off`처럼 3글자 이하인 단일 단어는 완전 일치라도 재사용
+  금지(무조건 AI가 새로 번역)하도록 `get_by_source()`/`get_fuzzy()` 양쪽에 적용.
+  `ENABLED`처럼 다의성 없는 긴 단일 단어는 그대로 재사용 유지.
+- **숫자 불일치 거부**: 퍼지 매칭 시 원문/후보의 숫자 시퀀스가 다르면
+  (`28LY` vs `30LY`) 무조건 거부하도록 이미 존재하던 로직 유지·검증.
+
+### esp_handler.py — 필드 매핑 오류 및 환각 방지
+
+`bethesda_strings/esp_handler.py`:
+- **`DOOR/CNAM` 필드 제거**: "닫기 대체 텍스트"로 추정하고 번역 대상에
+  포함시켰으나, 실제로는 애니메이션 리소스 경로(`setdressing\animated\...`)가
+  들어있음이 확인됨. 번역 시 해당 애니메이션이 깨질 수 있는 심각한 버그였음.
+- **경로처럼 생긴 문자열 전역 필터 추가**: 역슬래시/슬래시가 있고 공백이 없는
+  텍스트는 어떤 필드에서 나왔든 번역 대상에서 자동 제외 (`_looks_like_resource_path`).
+  유사한 미발견 필드 매핑 오류에 대한 안전망.
+- **`QUST/FULL` 환각 방지 안내문**: 스크립트 전용 "유틸리티 퀘스트"의 짧고
+  맥락 없는 이름(`"Item Spawn"`, `"Travel Handler"`)을 AI가 `"볼텍스 스폰"`,
+  `"안전하게 다니세요"` 등 완전히 무관한 내용으로 창작하는 문제 확인.
+  모든 `QUST/FULL` 항목에 "내부 CK 이름이며 플레이어에게 안 보일 수 있음,
+  창작하지 말고 문자 그대로 번역"이라는 context_note를 자동 부여.
+
+### 캐시 — 수동 교정 및 재시도 관련 버그
+
+- **수동 교정이 캐시에 반영 안 됨 (`gui/main_window.py`)**: `_on_string_corrected`에
+  캐시 쓰기 로직 추가. 워커가 사용하는 것과 동일한 캐시 키
+  (`TranslationCache.make_key`)를 생성하는지 검증 완료.
+- **더블클릭 편집 팝업만 이 로직을 안 탐 (`gui/string_table.py`)**: 인라인 편집/
+  포커스 모드는 `string_manually_corrected` 시그널을 정상 발신했으나,
+  `_open_edit_dialog`(더블클릭 팝업)만 `set_translated_text()`만 호출하고
+  시그널을 안 보내서 캐시 저장 로직이 아예 트리거되지 않음. 시그널 발신 추가.
+- **품질검토 재번역이 캐시에 의해 무력화됨**: `is_retry`(재번역 힌트) 요청에
+  캐시 조회 가드가 없어서, 문제로 지적된 바로 그 번역을 캐시에서 다시
+  가져와 반환 → AI 재호출 자체가 안 일어남. TM은 원래 이 가드가 있었음
+  (이유: TM 자체에 결함 있으면 무한 재시도 루프 위험) — 캐시에도 동일 가드
+  추가 (`openai_compat_worker.py`, `claude_translation_worker.py`).
+  `claude_translation_worker.py`는 TM 쪽에도 이 가드가 원래 없었음 — 같이 추가.
+
+### 429 요청 제한 및 동시성
+
+`gui/openai_compat_worker.py`:
+- **429 재시도 로직 부재**: TM 조회 최적화로 요청 속도가 빨라지면서, Gemini
+  무료 티어의 분당 10회 제한을 순식간에 초과 → 대량 429 발생, 재시도 없이
+  즉시 실패 처리되던 문제. `Retry-After` 헤더 존중 + 지수 백오프(최대 5회)
+  추가.
+- **중복 문자열 API 재사용 부재 → 사전 스캔 방식으로 통일**: 배치에 동일
+  원문이 여러 번 있을 때(`"Chunks (105 Credits)"` x50 등), 병렬 작업자 수만큼
+  동시에 캐시 미스 상태로 API를 각각 호출하는 문제. 처음엔 락/이벤트 기반
+  in-flight 병합으로 구현했으나, `ollama_worker.py`에 이미 있던 더 안전한
+  사전 스캔(pre-flight scan) + 결과 팬아웃 방식으로 재작성 (경쟁 상태 자체가
+  발생 불가능한 구조). `claude_translation_worker.py`도 동일하게 통일.
+  - 부수 발견: `claude_translation_worker.py`가 `TranslationCache.put()`
+    (존재하지 않는 메서드, 실제로는 `set()`)을 호출해 성공한 번역도 예외로
+    실패 처리되던 버그, 그리고 캐시 키 포맷이 다른 두 워커와 달라 수동 교정이
+    Claude 백엔드에서 인식 안 되던 문제도 같이 수정.
+  - 리팩터링 중 발견한 후속 버그: 일반 중복과 "강제 재번역" 요청이 같은
+    캐시 키를 공유해 팔로워 목록을 서로 가로채 잘못된 결과로 덮어쓰는 문제 →
+    팔로워 목록 "소유권"을 명시적으로 추적하도록 수정, 10회 반복 재현 테스트로 검증.
+
+### 테이블 정렬 및 번역 중 데이터 무결성
+
+`gui/string_table.py`, `gui/main_window.py`:
+- **열 클릭 정렬 기능 추가**: FormID/Original/Translated/EDID/Type/Status
+  전 열에서 오름차순/내림차순 토글 가능.
+- **정렬이 번역 배치 중 행을 오염시키는 버그**: 번역 결과는 배치 시작 시점의
+  행 "위치"(index)로 라우팅되는데, Qt는 정렬이 켜진 상태에서 데이터가
+  바뀌면 자동으로 재정렬을 시도함 → 배치 도중 재정렬되면 이미 전송된 요청의
+  결과가 엉뚱한 행에 적용됨 (실제로 재현: `Unobtainium` 행에
+  `"Receiver that is destroyed..."` 번역문이 들어가는 사고 확인).
+  - 1차 수정: `_start_translation`에 정렬 잠금 추가 — 그러나 "전체 번역"만
+    켜지는 자체 검토(품질검사 후 재번역) 파이프라인이 `_start_translation`을
+    거치지 않고 별도 경로로 배치를 시작해 여전히 무방비였음.
+  - 2차 수정: 배치를 시작하는 경로 4곳(`_start_translation`,
+    `_retranslate_with_hints`, `_ai_fix_with_hints`, TXT 모드 번역) 전부에
+    잠금 추가, 무조건 해제하던 로직을 "체인이 진짜로 끝나는 지점"
+    (`_announce_batch_complete` 또는 `_self_review_finish`)으로 재배치.
+  - 이중 안전장치: `StringTableModel.sort()` 자체에도 번역 진행 중엔
+    무조건 무시하는 락 추가 — `setSortingEnabled` 토글 하나에만 의존하지
+    않도록 방어적으로 설계.
+
+### 신규 기능
+
+- **Force Retranslate Selected (Ctrl+Alt+T)**: `translate_selected()`가 이미
+  번역된 행은 조용히 건너뛰는 사양이라, 버그 수정 후 재번역이 필요한 행을
+  강제로 다시 돌릴 방법이 없던 문제 해결. 번역칸을 비운 뒤 정상 번역 흐름 재사용.
+- **Apply to All Identical Originals (Ctrl+Alt+D)**: 동일 원문이 여러 번
+  등장할 때 AI가 매번 다르게 번역하는 문제(예: `"Heretical Writings"`가
+  `"이단 문헌"`/`"이단의 저작"`로 제각각)를 근본적으로 우회 — 한 행을
+  검수한 뒤 파일 내 동일 원문 전체에 그 번역을 그대로 복제.
+- **Translation Memory 뷰어**: 상태바에 상시 "TM: N entries" 표시(클릭 시
+  뷰어 열림) + 검색 가능한 브라우저 다이얼로그. TM이 실제로 로드됐는지
+  확인할 방법이 기존엔 1회성 상태 메시지뿐이었음.
+- **번역 출처 색상 표시**: TM/캐시/API 중 어디서 왔는지 행 배경색으로 구분
+  (캐시=`#03593E`, API=`#0C906B`, TM/수동교정=무색). 세 워커의
+  `translation_ready` 시그널에 출처 인자를 추가해 전달. 완료 메시지 및 자체
+  검토 요약에도 `(TM: N, Cache: N, API: N)` 통계 표시.
+- **포터블 모드**: exe 옆에 `PortableData` 폴더가 있으면 설정/캐시를 그
+  안에 저장(배포용), 없으면 기존 `%APPDATA%` 그대로 사용(자동 감지,
+  기존 설치에 영향 없음).
+
+### UI/UX 개선
+
+- 설정 화면 "다른 이름으로 저장" 다이얼로그가 매번 기본 홈 폴더로 초기화되던
+  문제 → `QSettings`에 마지막 저장 폴더 기억.
+- `Ctrl+Shift+A` 단축키가 "전체 번역"과 "오디오 미리듣기 패널"에 중복 등록되어
+  전체 번역이 눌리지 않던 문제 → 오디오 패널을 `Ctrl+Shift+U`로 이동.
+- 크래시 복구 스냅샷이 저장(Save/다른 이름으로 저장) 후에도 안 지워져서,
+  정상 저장했는데도 다음 실행 시 "복원하시겠습니까?"가 계속 뜨던 문제 →
+  저장 성공 시점에 스냅샷 삭제하도록 수정.
+- 첫 실행 안내(Quick-Start Tips) 다이얼로그를 도움말 메뉴에서 언제든 다시
+  열 수 있도록 분리, 이후 사용자 요청으로 **매 실행 시 항상 표시**하도록 변경.
+  단축키 목록에 `Ctrl+S`/`Ctrl+Shift+S`/`Ctrl+T`/`Ctrl+Alt+T`/`Ctrl+Shift+A`/
+  `Ctrl+Alt+D`/`Ctrl+F`/`Shift+F7`/`Ctrl+R`/`Ctrl+F7` 등 추가, 실제 바인딩과
+  달랐던 옛 `Ctrl+A` 항목 수정.
+
+### 현지화 완성
+
+- `gui/translations/ko_KR.qm`이 오래되어 `.ts`에 이미 있던 최신 한국어
+  번역(1625개 중 사실상 전부)이 실제 앱에는 반영 안 되고 있던 문제 →
+  `pyside6-lrelease`로 재컴파일.
+- `self.tr()`로 감싸지지 않아 애초에 번역 카탈로그에 들어갈 수 없었던
+  하드코딩 영어 문자열 66개 발견 (`diff_viewer.py`, `nexusmods_upload_dialog.py`,
+  `main_window.py`, `app_settings.py`, `audio_preview_panel.py`) → 전부
+  `self.tr()`/`QCoreApplication.translate()`로 감싸고 `.ts`에 한국어 번역
+  추가 후 재컴파일. `.ts` 총 1625 → 1691개.
+
+---
+
 ## 알려진 미해결 이슈
 
 - `Knock yourself out` 같은 영어 이디엄은 로컬 모델(EXAONE 등)이 처리 못함;
@@ -231,11 +375,12 @@ API 키만 입력하면 됨 — 별도 프록시 서버 실행 불필요.
 - 반말/존댓말 구분은 로컬 7.8B급 모델의 근본적 한계 (세계관 지식 부족).
   Gemini 3.5 Flash는 유의미하게 나으나 완벽하지 않음 — Rule 11(맥락 기반
   반말/존댓말 가이드)로 개선 시도했으나 지속적인 검증 필요.
-- `gui/translations/ko_KR.ts`가 명령 팔레트(Ctrl+K)의 일부 항목(Navigate Down,
-  Navigate Up, Go to First/Last Row 등)을 아직 번역하지 않음 — `.ts`에 항목 추가
-  후 `lrelease`로 재컴파일 필요.
 - 원본 번역 모델(`translategemma3-st`)은 개발자가 NexusMods에서 미배포 상태로
   확인함 — 현재는 EXAONE 3.5 또는 Gemini/ChatGPT 백엔드 사용.
+- `.ts`/`.qm`은 수동 동기화 방식 — 새 UI 문자열을 `self.tr()`로 추가한 뒤엔
+  `.ts`에 번역을 채우고 `pyside6-lrelease`로 재컴파일해야 실제 화면에 반영됨
+  (자동화된 빌드 스텝 없음, 3차 세션에서 이 격차로 인한 "메뉴가 영어로 보임"
+  이슈가 실제로 발생했었음).
 
 ---
 

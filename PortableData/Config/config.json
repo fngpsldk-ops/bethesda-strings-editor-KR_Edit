@@ -49,8 +49,16 @@
   "nexusmods_cookies_file": "",
   "tips_shown": true,
   "recent_files": [
-    "C:/Users/fngps/Documents/2.make/modding/Trans/update/SnuSnuField.esm",
-    "C:/Users/fngps/Documents/2.make/modding/Trans/update/Gallion.esm"
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Zal_MantisLair.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/ws_VariableContrabandPrices.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Wicked Outpost Strucktured.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Wicked Outpost Projeckt Fielded.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Wicked Outpost Projeckt 2.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Wicked Outpost Projeckt - Build with Credits Patch.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/WeaponsJam_THPSettings.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/VNLAPlus_ApparelFixes.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Venworks-EncountersOverhaul.esm",
+    "E:/Tullius Heritage Protocol/MOD/mods/\ubaa8\ub4dc \ud55c\uae00 \ud328\uce58/Vehicles.esm"
   ],
   "enable_ai_qc": false,
   "ai_qc_model": "qcgemma4-st",
