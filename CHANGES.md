@@ -385,29 +385,6 @@ API 키만 입력하면 됨 — 별도 프록시 서버 실행 불필요.
 
 ---
 
-## 알려진 미해결 이슈
-
-- `Knock yourself out` 같은 영어 이디엄은 로컬 모델(EXAONE 등)이 처리 못함;
-  Gemini/ChatGPT 백엔드 사용 권장 (Settings > Translation Backend > Cloud AI)
-- 반말/존댓말 구분은 로컬 7.8B급 모델의 근본적 한계 (세계관 지식 부족).
-  Gemini 3.5 Flash는 유의미하게 나으나 완벽하지 않음 — Rule 11(맥락 기반
-  반말/존댓말 가이드)로 개선 시도했으나 지속적인 검증 필요.
-- 원본 번역 모델(`translategemma3-st`)은 개발자가 NexusMods에서 미배포 상태로
-  확인함 — 현재는 EXAONE 3.5 또는 Gemini/ChatGPT 백엔드 사용.
-- `.ts`/`.qm`은 수동 동기화 방식 — 새 UI 문자열을 `self.tr()`로 추가한 뒤엔
-  `.ts`에 번역을 채우고 `pyside6-lrelease`로 재컴파일해야 실제 화면에 반영됨
-  (자동화된 빌드 스텝 없음, v1.0.8_KR 이전엔 이 격차로 인한 "메뉴가 영어로
-  보임" 이슈가 실제로 발생했었음).
-
----
-
-## 원본 업데이트 반영 방법
-
-원본 저장소에 업데이트가 올라왔을 때:
-```powershell
-git remote add upstream https://github.com/0xra0/bethesda-strings-editor
-git fetch upstream
-git merge upstream/main
 # 충돌 해결 후
 git push
 ```
