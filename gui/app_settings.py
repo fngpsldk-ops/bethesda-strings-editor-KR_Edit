@@ -100,6 +100,12 @@ class AppSettings:
     # pkexec) so a password dialog appears — no NOPASSWD rule or terminal needed.
     # Ignored on Windows (use a non-root taskkill command instead).
     ollama_restart_elevate: bool = False
+    # User-added custom Ollama model names that persist across restarts even
+    # when the model isn't (yet) installed/returned by /api/tags -- e.g. a
+    # model the user plans to pull, or one served by a proxy in front of
+    # Ollama that doesn't report it. Shown at the top of the model dropdown
+    # alongside whatever Ollama reports as actually installed.
+    ollama_custom_models: list = field(default_factory=list)
 
     # ── Translation defaults ─────────────────────────────────────
     default_source_lang: str = "en"   # BSEK: English source only

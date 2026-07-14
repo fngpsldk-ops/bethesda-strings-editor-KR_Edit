@@ -15,7 +15,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QKeySequenceEdit
 from typing import TYPE_CHECKING, Optional
 from gui.app_settings import (
-    AppSettings,
+    AppSettings, save_settings,
     get_config_dir, get_config_dir_override, set_config_dir_override,
     get_cache_dir, get_cache_dir_override, set_cache_dir_override,
 )
@@ -298,11 +298,25 @@ class SettingsDialog(QDialog):
             self.tr(
                 "Type any Ollama model name or pick from the list.\n"
                 "Installed models are detected automatically and the list refreshes "
-                "while this window is open (e.g. after 'ollama pull')."
+                "while this window is open (e.g. after 'ollama pull').\n"
+                "Not installed yet? Type the name and click 'Add' to save it here "
+                "for next time. Right-click a saved custom entry to remove it."
             )
         )
+        self.ollama_model.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ollama_model.customContextMenuRequested.connect(self._show_ollama_model_context_menu)
         model_row = QHBoxLayout()
         model_row.addWidget(self.ollama_model, stretch=1)
+        self.btn_add_model = QPushButton(self.tr("Add"))
+        self.btn_add_model.setToolTip(
+            self.tr(
+                "Save the currently typed model name so it stays in this list "
+                "next time — even if Ollama hasn't reported it as installed yet "
+                "(e.g. before you've run 'ollama pull')."
+            )
+        )
+        self.btn_add_model.clicked.connect(self._add_custom_ollama_model)
+        model_row.addWidget(self.btn_add_model)
         self.btn_refresh_models = QPushButton(self.tr("Refresh"))
         self.btn_refresh_models.setToolTip(
             self.tr("Re-scan installed models now (also refreshes automatically)")
@@ -1234,12 +1248,94 @@ class SettingsDialog(QDialog):
         root_layout.addWidget(buttons)
 
     def _default_ollama_model_list(self) -> list:
-        """Return models to pre-populate the combo on dialog open."""
-        models = list(self._DEFAULT_OLLAMA_MODELS)
+        """Return models to pre-populate the combo on dialog open.
+
+        Order: current selection, then user-saved custom models (most
+        recently added first), then the built-in preset list — with
+        duplicates removed while keeping the first occurrence.
+        """
         current = self._settings.ollama_model
-        if current and current not in models:
-            models.insert(0, current)
-        return models
+        custom = list(getattr(self._settings, "ollama_custom_models", None) or [])
+        models = ([current] if current else []) + custom + list(self._DEFAULT_OLLAMA_MODELS)
+        seen: set[str] = set()
+        result = []
+        for m in models:
+            if m and m not in seen:
+                seen.add(m)
+                result.append(m)
+        return result
+
+    @Slot()
+    def _add_custom_ollama_model(self) -> None:
+        """Save the currently typed model name to the persisted custom list.
+
+        Unlike the rest of this dialog (only written on the outer OK/저장),
+        this writes to disk immediately -- mirroring PromptEditorDialog's
+        preset Save button -- so the addition survives even if the dialog is
+        later cancelled. Bare "Add" clicks with nothing typed are a no-op.
+        """
+        name = self.ollama_model.currentText().strip()
+        if not name:
+            return
+
+        custom = list(getattr(self._settings, "ollama_custom_models", None) or [])
+        if name in custom:
+            already_present = True
+        else:
+            already_present = False
+            custom.insert(0, name)
+            custom = custom[:30]  # keep the list from growing without bound
+            self._settings.ollama_custom_models = custom
+            try:
+                save_settings(self._settings)
+            except Exception:
+                logger.exception("Failed to save custom Ollama model list")
+
+        # Reflect in the combo immediately, regardless of whether it was new.
+        if self.ollama_model.findText(name) < 0:
+            self.ollama_model.insertItem(0, name)
+        self.ollama_model.setCurrentText(name)
+
+        # Lightweight non-blocking feedback on the button itself.
+        self.btn_add_model.setText(self.tr("Already added") if already_present else self.tr("✓ Added"))
+        self.btn_add_model.setEnabled(False)
+        QTimer.singleShot(1200, self._reset_add_model_button)
+
+    def _reset_add_model_button(self) -> None:
+        self.btn_add_model.setText(self.tr("Add"))
+        self.btn_add_model.setEnabled(True)
+
+    def _remove_custom_ollama_model(self, name: str) -> None:
+        """Remove *name* from the persisted custom list and the combo."""
+        custom = list(getattr(self._settings, "ollama_custom_models", None) or [])
+        if name not in custom:
+            return
+        custom.remove(name)
+        self._settings.ollama_custom_models = custom
+        try:
+            save_settings(self._settings)
+        except Exception:
+            logger.exception("Failed to save custom Ollama model list")
+        idx = self.ollama_model.findText(name)
+        if idx >= 0:
+            self.ollama_model.removeItem(idx)
+
+    def _show_ollama_model_context_menu(self, pos) -> None:
+        """Right-click menu on the model field: remove a saved custom entry.
+
+        Only offered for names the user actually added via 'Add' (not for
+        the built-in presets or models Ollama itself reports as installed),
+        so this can't be used to hide real installed models from the list.
+        """
+        from PySide6.QtWidgets import QMenu
+        name = self.ollama_model.currentText().strip()
+        custom = list(getattr(self._settings, "ollama_custom_models", None) or [])
+        if not name or name not in custom:
+            return
+        menu = QMenu(self)
+        action = menu.addAction(self.tr("Remove '{name}' from saved list").format(name=name))
+        action.triggered.connect(lambda: self._remove_custom_ollama_model(name))
+        menu.exec(self.ollama_model.mapToGlobal(pos))
 
     @Slot(str)
     def _update_model_hint(self, model: str) -> None:
@@ -1404,6 +1500,13 @@ class SettingsDialog(QDialog):
             return
         current = self.ollama_model.currentText()
         items = list(names)
+        # Keep saved custom models visible even though Ollama's /api/tags
+        # didn't report them (not pulled yet, or served through a proxy that
+        # doesn't list them) -- otherwise a live refresh would silently wipe
+        # every custom entry the user explicitly added and saved.
+        for m in getattr(self._settings, "ollama_custom_models", None) or []:
+            if m and m not in items:
+                items.insert(0, m)
         # Keep any custom name the user typed/saved that isn't installed (yet).
         if current and current not in items:
             items.insert(0, current)
