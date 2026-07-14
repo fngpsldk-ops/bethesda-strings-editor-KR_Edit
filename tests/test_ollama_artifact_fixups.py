@@ -25,6 +25,7 @@ strip_br = OllamaWorker._strip_spurious_br
 unwrap = OllamaWorker._unwrap_spurious_brackets
 match_nl = OllamaWorker._match_trailing_newlines
 heal = OllamaWorker._heal_known_artifacts
+unwrap_leaked = OllamaWorker._unwrap_leaked_example_brackets
 
 
 # ── _strip_spurious_br ─────────────────────────────────────────────────────────
@@ -274,3 +275,66 @@ def test_heal_noop_on_clean_text():
     src = "Clean source."
     tgt = "Чисте джерело."
     assert heal(tgt, src) == "Чисте джерело."
+
+
+# ── _unwrap_leaked_example_brackets ─────────────────────────────────────────────
+# Rule 3.a/3.d of default_rules_block() teaches pairs like "[Flirt]→[유혹]" so
+# the model can handle GENUINELY bracketed dialogue-choice/status tags. The
+# model over-generalizes: it wraps brackets around the Korean translation any
+# time the bare English word appears, even with nothing bracketed in the
+# source. These cases are taken from an actual reported bug (BSEK string
+# 0x02000943, an MCM "Flirt Cooldown" settings label mistranslated as
+# "[유혹] 재사용 대기시간").
+
+def test_reported_bug_flirt_cooldown_with_token():
+    src = "Flirt Cooldown <Token=CurrentFlirt>"
+    tgt = "[유혹] 재사용 대기시간 <Token=CurrentFlirt>"
+    assert unwrap_leaked(tgt, src) == "유혹 재사용 대기시간 <Token=CurrentFlirt>"
+
+
+def test_reported_bug_flirt_cooldown_multiline_block():
+    src = "Flirt Cooldown: Click to toggle 0 or 3 days."
+    tgt = "[유혹] 재사용 대기시간: 클릭하여 0일 또는 3일로 전환하십시오."
+    assert unwrap_leaked(tgt, src) == "유혹 재사용 대기시간: 클릭하여 0일 또는 3일로 전환하십시오."
+
+
+def test_leaked_brackets_common_and_unknown():
+    src = "Common resource found in Unknown systems."
+    tgt = "[알 수 없음] 시스템에서 발견된 [일반] 자원."
+    assert unwrap_leaked(tgt, src) == "알 수 없음 시스템에서 발견된 일반 자원."
+
+
+def test_genuinely_bracketed_dialogue_choice_preserved():
+    # The rule's actual intended case: source has [Flirt] as a real dialogue
+    # choice tag -- brackets must stay in the translation.
+    src = "You can choose to [Flirt] with the companion."
+    tgt = "동료에게 [유혹]을 선택할 수 있습니다."
+    assert unwrap_leaked(tgt, src) == tgt
+
+
+def test_leaked_bracket_noop_when_word_absent_from_source():
+    src = "Totally unrelated sentence."
+    tgt = "[일반] 텍스트입니다."
+    assert unwrap_leaked(tgt, src) == tgt
+
+
+def test_leaked_bracket_noop_on_empty_args():
+    assert unwrap_leaked("", "Flirt Cooldown") == ""
+    assert unwrap_leaked("[유혹] 텍스트", "") == "[유혹] 텍스트"
+
+
+def test_all_caps_examples_excluded_from_leaked_table():
+    # CANCELED/VATS etc. are already handled by _unwrap_spurious_brackets
+    # (identity mapping); they must not also appear in the mixed-case table.
+    from gui.ollama_worker import _BRACKET_TRANSLATION_EXAMPLES
+    assert "CANCELED" not in _BRACKET_TRANSLATION_EXAMPLES
+    assert "VATS" not in _BRACKET_TRANSLATION_EXAMPLES
+    assert _BRACKET_TRANSLATION_EXAMPLES.get("Flirt") == "유혹"
+
+
+def test_heal_known_artifacts_also_covers_leaked_example_brackets():
+    # Cache-hit healing path must fix the same class of bug.
+    src = "Flirt Cooldown <Token=CurrentFlirt>"
+    tgt = "[유혹] 재사용 대기시간 <Token=CurrentFlirt>"
+    assert heal(tgt, src) == "유혹 재사용 대기시간 <Token=CurrentFlirt>"
+

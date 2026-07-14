@@ -358,6 +358,35 @@ def default_rules_block(target_lang: str = "ko") -> str:
     return rules_block
 
 
+# ── Bracket-example leakage guard ─────────────────────────────────────────────
+# Rule 3.a/3.d of default_rules_block() teach the model pairs like
+# "[Flirt]->[유혹]" and "[Common]->[일반]" so it can correctly translate
+# GENUINELY bracketed dialogue-choice/skill tags and status codes while
+# preserving the brackets. Side effect (confirmed in practice): the model
+# over-generalizes the pairing and wraps brackets around the Korean
+# translation any time the bare English word shows up at all -- e.g. an MCM
+# settings label "Flirt Cooldown" (nothing bracketed in the source) came
+# back as "[유혹] 재사용 대기시간" instead of "유혹 재사용 대기시간". This is
+# the mixed-case counterpart of _unwrap_spurious_brackets(), which only
+# covers ALL-CAPS identity tokens (LIST, VATS, ...) where source==target;
+# here the target is a *different* Korean word, so the fix must strip the
+# brackets around the translated word instead of the (never-appearing in
+# translation) English one.
+_BRACKET_EXAMPLE_RE = re.compile(r"\[([A-Za-z]+)\]→\[([^\]]+)\]")
+
+
+def _parse_bracket_translation_examples() -> dict:
+    """English word -> Korean translation, for the mixed-case entries in
+    rule 3.a/3.d (all-caps ones like CANCELED/VATS are skipped: those are
+    already handled by _unwrap_spurious_brackets's generic ALL-CAPS path)."""
+    text = default_rules_block("ko")
+    pairs: dict = {}
+    for eng, kor in _BRACKET_EXAMPLE_RE.findall(text):
+        if not eng.isupper():
+            pairs[eng] = kor
+    return pairs
+
+
 # ── Per-language prompt data ──────────────────────────────────────────────────
 
 # Full display name used in the "To {Language}:" user-turn prefix that
@@ -461,6 +490,11 @@ _TARGET_STYLE: dict[str, str] = {
         "genuinely unknown, prefer neutral phrasing over naming a pronoun."
     ),
 }
+
+# Computed once here (after _TARGET_STYLE, which default_rules_block() reads)
+# from the live rule text above, so this stays in sync automatically if the
+# bracket-example list is ever edited.
+_BRACKET_TRANSLATION_EXAMPLES: dict = _parse_bracket_translation_examples()
 
 # Extra notes inserted after the universal rules — for source languages that
 # need special handling instructions.
@@ -1684,6 +1718,7 @@ class OllamaWorker(QObject):
             result = self._restore_dropped_tags(result, req.original_text)
             result = self._strip_spurious_br(result, req.original_text)
             result = self._unwrap_spurious_brackets(result, req.original_text)
+            result = self._unwrap_leaked_example_brackets(result, req.original_text)
             result = self._restore_size_spacers(result, req.original_text)
             result = self._restore_unclosed_guillemets(result)
             result = self._restore_dropped_opening_brackets(result, req.original_text)
@@ -2292,6 +2327,7 @@ class OllamaWorker(QObject):
                 translated = self._restore_dropped_tags(translated, req.original_text)
                 translated = self._strip_spurious_br(translated, req.original_text)
                 translated = self._unwrap_spurious_brackets(translated, req.original_text)
+                translated = self._unwrap_leaked_example_brackets(translated, req.original_text)
                 translated = self._restore_size_spacers(translated, req.original_text)
                 translated = self._restore_unclosed_guillemets(translated)
                 translated = self._restore_dropped_opening_brackets(translated, req.original_text)
@@ -2777,6 +2813,44 @@ class OllamaWorker(QObject):
                 translated = translated.replace(bracketed, tok)
         return translated
 
+    @staticmethod
+    def _unwrap_leaked_example_brackets(translated: str, original: str) -> str:
+        """Strip brackets the model hallucinates around a few-shot example's
+        Korean translation, when the paired English word appears BARE
+        (unbracketed) in the source.
+
+        Rule 3.a/3.d of default_rules_block() teach pairs like
+        "[Flirt]→[유혹]" and "[Common]→[일반]" so the model can correctly
+        translate GENUINELY bracketed dialogue-choice/skill tags and status
+        codes while preserving the brackets. Confirmed in practice: the model
+        over-generalizes this pairing and wraps brackets around the Korean
+        translation any time the bare English word appears at all -- an MCM
+        settings label "Flirt Cooldown" (nothing bracketed in the source)
+        came back as "[유혹] 재사용 대기시간" instead of "유혹 재사용 대기시간".
+
+        This is the mixed-case counterpart of _unwrap_spurious_brackets():
+        that one only covers ALL-CAPS identity tokens (source text == target
+        text, e.g. LIST/VATS), so simply dropping the brackets recovers the
+        original word. Here the target is a genuinely different Korean word,
+        so the fix strips the brackets around the *translated* word instead.
+
+        Only fires when the English word appears in the source WITHOUT its
+        own brackets there -- a genuinely bracketed source occurrence (the
+        rule's actual intended case) is left untouched.
+        """
+        if not translated or not original:
+            return translated
+        for eng, kor in _BRACKET_TRANSLATION_EXAMPLES.items():
+            bracketed_kor = f"[{kor}]"
+            if bracketed_kor not in translated:
+                continue
+            if f"[{eng}]" in original:
+                continue  # genuinely bracketed in the source -- leave it
+            if not re.search(rf"(?<![\w\[]){re.escape(eng)}(?![\w\]])", original):
+                continue  # the English word isn't even in the source
+            translated = translated.replace(bracketed_kor, kor)
+        return translated
+
     @classmethod
     def _heal_known_artifacts(cls, text: str, original: str) -> str:
         """Apply the source-deterministic fixups that also heal stale cache hits:
@@ -2787,6 +2861,7 @@ class OllamaWorker(QObject):
             return text
         text = cls._strip_spurious_br(text, original)
         text = cls._unwrap_spurious_brackets(text, original)
+        text = cls._unwrap_leaked_example_brackets(text, original)
         text = cls._restore_missing_newlines(text, original)
         text = cls._match_trailing_newlines(text, original)
         return text
