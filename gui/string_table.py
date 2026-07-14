@@ -422,6 +422,7 @@ class StringTableModel(QAbstractTableModel):
         self,
         translation_map: dict[int, str],
         source_map: dict[str, str] | None = None,
+        id_source_map: dict[int, str] | None = None,
     ) -> int:
         """Import translations from ID→text and/or source→text maps.
 
@@ -429,10 +430,20 @@ class StringTableModel(QAbstractTableModel):
           1. By string ID (fast, exact)
           2. By source text (fallback for rows whose ID wasn't in the map)
 
+        When *id_source_map* (ID → source text the translation was made from)
+        is provided, an ID match is only applied if the row's original text
+        matches that recorded source. Bethesda string IDs are unique only
+        within one plugin, so importing a TM built from another plugin (e.g.
+        the official game translation) into a mod's file would otherwise
+        overwrite rows whose IDs merely collide with unrelated entries.
+
         Returns the number of rows actually updated.
         """
         if not translation_map and not source_map:
             return 0
+
+        def _norm(s: str) -> str:
+            return (s or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
         applied_count = 0
         id_to_row = {row["id"]: i for i, row in enumerate(self._data)}
@@ -444,6 +455,12 @@ class StringTableModel(QAbstractTableModel):
         for string_id, text in (translation_map or {}).items():
             if string_id in id_to_row:
                 row_idx = id_to_row[string_id]
+                if id_source_map is not None:
+                    recorded_src = id_source_map.get(string_id)
+                    if recorded_src is not None and _norm(recorded_src) != _norm(
+                        self._data[row_idx].get("original", "")
+                    ):
+                        continue  # ID collision with an unrelated string — skip
                 self._data[row_idx]["translated"] = text
                 self._data[row_idx]["status"] = "translated"
                 matched_rows.add(row_idx)

@@ -1009,8 +1009,13 @@ class OllamaWorker(QObject):
         parts = [f"pv{PROMPT_VERSION}", f"persona={_active_persona}", f"rules={_active_custom_rules}"]
         if self.glossary_manager is not None:
             try:
-                entries = self.glossary_manager.get_all_entries()
-                for e in sorted(entries, key=lambda x: x.source_term):
+                # GlossaryManager exposes all_entries() -> [(scope, entry)];
+                # the previous get_all_entries() call raised AttributeError,
+                # was swallowed by the except below, and silently EXCLUDED the
+                # glossary from this hash -- so editing the glossary never
+                # invalidated cached translations (confirmed by test).
+                entries = [e for _scope, e in self.glossary_manager.all_entries()]
+                for e in sorted(entries, key=lambda x: (x.source_term, x.target_term)):
                     parts.append(f"{e.source_term}={e.target_term}")
             except Exception:
                 pass
@@ -1251,7 +1256,9 @@ class OllamaWorker(QObject):
             # Exact TM lookup (O(1) dict reads — no fuzzy here to keep pre-flight fast)
             if not is_retry and self.translation_memory:
                 mem_hit = (
-                    self.translation_memory.get_by_id(req.string_id)
+                    self.translation_memory.get_by_id(
+                        req.string_id, expected_source=req.original_text
+                    )
                     or self.translation_memory.get_by_source(req.original_text)
                 )
                 if mem_hit:
@@ -1749,7 +1756,9 @@ class OllamaWorker(QObject):
         # Check translation memory first — exact hits skip cache and Ollama entirely.
         # Bypassed for retranslations: the memory may hold the same flawed translation.
         if not is_retry and self.translation_memory:
-            mem_hit = self.translation_memory.get_by_id(req.string_id)
+            mem_hit = self.translation_memory.get_by_id(
+                req.string_id, expected_source=req.original_text
+            )
             if mem_hit is None:
                 mem_hit = self.translation_memory.get_by_source(req.original_text)
             if mem_hit is None:

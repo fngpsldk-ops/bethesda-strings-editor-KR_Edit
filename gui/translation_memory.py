@@ -50,6 +50,16 @@ class TranslationMemory:
     def __init__(self) -> None:
         self._by_id:  dict[int, str] = {}   # string_id → translation
         self._by_src: dict[str, str] = {}   # original_text → translation
+        # string_id → source text that translation was made FROM, when known.
+        # Used by get_by_id() to verify an ID hit actually refers to the same
+        # string: Bethesda string IDs are only unique WITHIN one plugin, so a
+        # TM built from Starfield.esm and a mod's .strings file can share raw
+        # ID values that mean completely different strings. Without this
+        # check, get_by_id() -- consulted FIRST in every worker's TM cascade,
+        # before any text comparison -- silently returns the official
+        # translation of an unrelated string and it ships as a "tm" hit with
+        # no human in the loop.
+        self._id_src: dict[int, str] = {}
         self.source_path: str = ""
         self.loaded_count: int = 0
 
@@ -85,11 +95,13 @@ class TranslationMemory:
 
             if trans:
                 self._by_id[sid]   = trans
+                self._id_src[sid]  = orig
                 self._by_src[orig] = trans
                 count += 1
             elif use_original and orig:
                 # Reference-mode: "Original" already in target language
                 self._by_id[sid] = orig
+                self._id_src[sid] = orig
                 count += 1
 
         self.loaded_count = len(self._by_id)
@@ -115,7 +127,15 @@ class TranslationMemory:
     def clear(self) -> None:
         self._by_id.clear()
         self._by_src.clear()
+        self._id_src.clear()
         self.loaded_count = 0
+        # Invalidate the fuzzy word index. _ensure_word_index() only compares
+        # len(_by_src) between builds, so clear() + reloading a corpus that
+        # happens to have the SAME entry count would otherwise keep the stale
+        # index -- whose candidate texts no longer exist in _by_src, making
+        # get_fuzzy() raise KeyError mid-batch (confirmed by test).
+        self._word_index = {}
+        self._word_index_size = -1
 
     def save_json(self, path: Path) -> None:
         """Persist this TM as BSEK's own storage (config dir), independent of
@@ -126,6 +146,7 @@ class TranslationMemory:
         data = {
             "by_id": {str(k): v for k, v in self._by_id.items()},
             "by_src": self._by_src,
+            "id_src": {str(k): v for k, v in self._id_src.items()},
         }
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
@@ -135,14 +156,46 @@ class TranslationMemory:
         data = json.loads(path.read_text(encoding="utf-8"))
         self._by_id = {int(k): v for k, v in data.get("by_id", {}).items()}
         self._by_src = dict(data.get("by_src", {}))
+        self._id_src = {int(k): v for k, v in data.get("id_src", {}).items()}
         self.loaded_count = len(self._by_id)
+        # _by_src was wholesale-replaced; force a fuzzy-index rebuild even if
+        # the new corpus coincidentally has the same size as the old one.
+        self._word_index = {}
+        self._word_index_size = -1
         return len(self._by_id) + len(self._by_src)
 
     # ── Lookup ────────────────────────────────────────────────────────────────
 
-    def get_by_id(self, string_id: int) -> str | None:
-        """Return translation for *string_id*, or None if not found."""
-        return self._by_id.get(string_id)
+    @staticmethod
+    def _norm_src(s: str) -> str:
+        """Normalize a source text for identity comparison (line endings + trim)."""
+        return s.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    def get_by_id(self, string_id: int, expected_source: str | None = None) -> str | None:
+        """Return translation for *string_id*, or None if not found.
+
+        When *expected_source* is given AND this TM recorded the source text
+        the entry was translated from, the two must match (modulo line-ending
+        normalization and trimming) -- otherwise None is returned and the
+        caller falls through to get_by_source()/get_fuzzy(), which compare by
+        text and are therefore collision-safe.
+
+        Rationale: Bethesda string IDs are only unique per plugin. An ID from
+        the currently open mod colliding with an unrelated ID in a TM built
+        from another plugin (e.g. the official Starfield translation) would
+        otherwise return the translation of a completely different string.
+        TMs that never recorded source texts (load_strings_file: a bare
+        .strings file has only ID→text) keep the legacy unverified behavior,
+        as that path is intended for same-plugin version updates.
+        """
+        hit = self._by_id.get(string_id)
+        if hit is None:
+            return None
+        if expected_source is not None:
+            recorded = self._id_src.get(string_id)
+            if recorded is not None and self._norm_src(recorded) != self._norm_src(expected_source):
+                return None
+        return hit
 
     def get_by_source(self, original: str) -> str | None:
         """Return translation for *original* source text, or None.
@@ -252,7 +305,7 @@ class TranslationMemory:
         by_src = self._by_src
         result = best_fuzzy_match(
             original,
-            ((k, by_src[k]) for k in candidate_keys),
+            ((k, by_src[k]) for k in candidate_keys if k in by_src),
             max_score=max_score,
         )
         if result is None:
@@ -428,6 +481,11 @@ class TranslationMemory:
     def as_id_dict(self) -> dict[int, str]:
         """Return a copy of the ID→translation mapping."""
         return dict(self._by_id)
+
+    def id_source_map(self) -> dict[int, str]:
+        """Return a copy of the ID→source-text mapping (may be empty for TMs
+        loaded from bare .strings files, which carry no source text)."""
+        return dict(self._id_src)
 
     def __len__(self) -> int:
         return len(self._by_id)

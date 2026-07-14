@@ -6411,7 +6411,16 @@ class MainWindow(QMainWindow):
                 tgt = self.settings.default_target_lang[:2].lower()
                 loaded = memory.load_tmx(file_path, source_lang=src, target_lang=tgt)
             else:
-                loaded = memory.load(file_path, use_original=True)
+                # use_original=False: a TXT export's empty "Translated" column
+                # means the row is simply UNTRANSLATED and must be skipped.
+                # The old use_original=True (inherited from upstream's ru→uk
+                # workflow, where the source column already held target-language
+                # text) registered the ENGLISH original as if it were the
+                # translation for every such row -- those rows were then
+                # auto-applied to the table as "translated" and returned by
+                # get_by_id() during batch translation, shipping untouched
+                # English in a Korean patch (confirmed by test).
+                loaded = memory.load(file_path, use_original=False)
 
             if self.ollama_worker:
                 self.ollama_worker.translation_memory = memory
@@ -6424,7 +6433,13 @@ class MainWindow(QMainWindow):
 
             applied = 0
             if self.current_file is not None:
-                applied = self.table_model.import_translations(memory.as_id_dict())
+                # id_source_map: only apply an ID hit when the row's original
+                # text matches the source the TM entry was translated from --
+                # Bethesda string IDs are unique per plugin only, so a TM from
+                # another plugin (e.g. the official translation) can collide.
+                applied = self.table_model.import_translations(
+                    memory.as_id_dict(), id_source_map=memory.id_source_map()
+                )
 
             self.statusBar().showMessage(
                 self.tr(
@@ -6527,7 +6542,9 @@ class MainWindow(QMainWindow):
             logger.error("Failed to persist translation memory snapshot: %s", exc)
         applied = 0
         if self.current_file is not None:
-            applied = self.table_model.import_translations(tm.as_id_dict())
+            applied = self.table_model.import_translations(
+                tm.as_id_dict(), id_source_map=tm.id_source_map()
+            )
         self.statusBar().showMessage(
             self.tr("NexusMods TM loaded ({label}): {n} entries, {applied} applied").format(
                 label=label, n=len(tm), applied=applied
@@ -6539,7 +6556,9 @@ class MainWindow(QMainWindow):
     def _apply_nexus_merge(self, tm: TranslationMemory) -> None:
         applied = 0
         if self.current_file is not None:
-            applied = self.table_model.import_translations(tm.as_id_dict())
+            applied = self.table_model.import_translations(
+                tm.as_id_dict(), id_source_map=tm.id_source_map()
+            )
         self.statusBar().showMessage(
             self.tr("NexusMods merge: {applied} translation(s) applied.").format(applied=applied),
             8000,

@@ -185,8 +185,13 @@ class OpenAICompatWorker(QObject):
         parts = [f"pv{PROMPT_VERSION}", f"persona={_persona}", f"rules={_rules}"]
         if self.glossary_manager is not None:
             try:
-                entries = self.glossary_manager.get_all_entries()
-                for e in sorted(entries, key=lambda x: x.source_term):
+                # GlossaryManager exposes all_entries() -> [(scope, entry)];
+                # the previous get_all_entries() call raised AttributeError,
+                # was swallowed by the except below, and silently EXCLUDED the
+                # glossary from this hash -- so editing the glossary never
+                # invalidated cached translations (confirmed by test).
+                entries = [e for _scope, e in self.glossary_manager.all_entries()]
+                for e in sorted(entries, key=lambda x: (x.source_term, x.target_term)):
                     parts.append(f"{e.source_term}={e.target_term}")
             except Exception:
                 pass
@@ -255,7 +260,9 @@ class OpenAICompatWorker(QObject):
             # then fuzzy match. Same cascade as OllamaWorker / ClaudeTranslationWorker.
             is_retry = bool(req.retry_hint) or bool(req.fix_translation)
             if not is_retry and self.translation_memory:
-                tm_result = self.translation_memory.get_by_id(req.string_id)
+                tm_result = self.translation_memory.get_by_id(
+                    req.string_id, expected_source=source_text
+                )
                 if tm_result is None:
                     tm_result = self.translation_memory.get_by_source(source_text)
                 if tm_result is None:

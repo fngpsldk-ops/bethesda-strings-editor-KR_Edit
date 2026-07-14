@@ -109,12 +109,13 @@ class ClaudeTranslationWorker(QObject):
         self._stop_flag = False
         self._mutex = QMutex()
 
-        # Settings hash for cache keys (TranslationCache.make_key). Unlike
-        # OllamaWorker/OpenAICompatWorker, this worker has no
-        # _compute_settings_hash() (no glossary-driven cache invalidation
-        # here yet) — left as "" so the key format still matches theirs
-        # exactly, just without that extra invalidation dimension.
-        self._settings_hash = ""
+        # Settings hash for cache keys (TranslationCache.make_key), matching
+        # OllamaWorker/OpenAICompatWorker: glossary edits and prompt-rule
+        # changes alter the hash, so stale cached translations produced under
+        # the old glossary/prompt are bypassed and retranslated automatically.
+        # Recomputed at the start of every translate_batch() because the
+        # glossary_manager is attached after __init__.
+        self._settings_hash = self._compute_settings_hash()
 
         # Shared client — one connection pool reused across all worker threads.
         # Creating a new ClaudeClient per request was wasteful and broke prompt
@@ -135,6 +136,29 @@ class ClaudeTranslationWorker(QObject):
 
     # ── Main translation slot ──────────────────────────────────────────────────
 
+    def _compute_settings_hash(self) -> str:
+        """Short hash of glossary contents + prompt version (mirrors
+        OpenAICompatWorker._compute_settings_hash). Changing the glossary or
+        the prompt persona/rules changes this hash, so old cache entries are
+        bypassed and re-translated automatically."""
+        import hashlib as _hl
+        try:
+            from gui.ollama_worker import get_prompt_overrides
+            _persona, _rules = get_prompt_overrides()
+        except Exception:
+            _persona, _rules = "", ""
+        PROMPT_VERSION = 5
+        parts = [f"pv{PROMPT_VERSION}", f"persona={_persona}", f"rules={_rules}"]
+        if self.glossary_manager is not None:
+            try:
+                entries = [e for _scope, e in self.glossary_manager.all_entries()]
+                for e in sorted(entries, key=lambda x: (x.source_term, x.target_term)):
+                    parts.append(f"{e.source_term}={e.target_term}")
+            except Exception:
+                pass
+        combined = "\n".join(parts)
+        return _hl.sha256(combined.encode("utf-8")).hexdigest()[:12]
+
     @Slot(list)
     def translate_batch(self, requests: list) -> None:
         """Translate a batch of TranslationRequest objects using Claude."""
@@ -144,6 +168,9 @@ class ClaudeTranslationWorker(QObject):
 
         with QMutexLocker(self._mutex):
             self._stop_flag = False
+
+        # Recompute in case the glossary was edited or attached after __init__.
+        self._settings_hash = self._compute_settings_hash()
 
         total = len(requests)
         done = 0
@@ -198,23 +225,20 @@ class ClaudeTranslationWorker(QObject):
                 source_text, self.model, self.source_lang, self.target_lang,
                 self._settings_hash,
             )
-            if not is_retry and self.translation_cache:
-                cached = self.translation_cache.get(cache_key)
-                if cached:
-                    self.translation_ready.emit(req.index, cached, req.string_id, "cache")
-                    success += 1
-                    done += 1
-                    self.progress.emit(done, total)
-                    continue
 
-            # Check translation memory — exact ID hit, then exact source-text
-            # hit, then fuzzy match. Mirrors OllamaWorker's cascade; TranslationMemory
-            # has no .get() method, only get_by_id/get_by_source/get_fuzzy.
+            # Check translation memory FIRST — exact ID hit (verified against
+            # the source text so cross-plugin ID collisions can't misfire),
+            # then exact source-text hit, then fuzzy match. TM comes before
+            # the cache to match OllamaWorker/OpenAICompatWorker: the TM holds
+            # authoritative (official/human) translations, which should always
+            # outrank this worker's own past model output.
             # Guarded by is_retry (this worker previously had NO such guard,
             # unlike OllamaWorker/OpenAICompatWorker) for the same reason as
-            # the cache guard above.
+            # the cache guard below.
             if not is_retry and hasattr(self, "translation_memory") and self.translation_memory:
-                tm_result = self.translation_memory.get_by_id(req.string_id)
+                tm_result = self.translation_memory.get_by_id(
+                    req.string_id, expected_source=source_text
+                )
                 if tm_result is None:
                     tm_result = self.translation_memory.get_by_source(source_text)
                 if tm_result is None:
@@ -223,6 +247,22 @@ class ClaudeTranslationWorker(QObject):
                     )
                 if tm_result is not None:
                     self.translation_ready.emit(req.index, tm_result, req.string_id, "tm")
+                    success += 1
+                    done += 1
+                    self.progress.emit(done, total)
+                    continue
+
+            # Check translation cache. Uses TranslationCache.make_key() — the
+            # same format OllamaWorker/OpenAICompatWorker use — instead of the
+            # ad-hoc hash this previously built inline (no settings_hash,
+            # different field order). That mismatch meant a manually-corrected
+            # translation cached via the standard key (e.g. from the string
+            # editor, which writes through TranslationCache.make_key) was
+            # never found by this worker's own lookup.
+            if not is_retry and self.translation_cache:
+                cached = self.translation_cache.get(cache_key)
+                if cached:
+                    self.translation_ready.emit(req.index, cached, req.string_id, "cache")
                     success += 1
                     done += 1
                     self.progress.emit(done, total)
