@@ -17,6 +17,8 @@ Run with:
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gui.ollama_worker import OllamaWorker, TranslationRequest  # noqa: E402
@@ -26,6 +28,7 @@ unwrap = OllamaWorker._unwrap_spurious_brackets
 match_nl = OllamaWorker._match_trailing_newlines
 heal = OllamaWorker._heal_known_artifacts
 unwrap_leaked = OllamaWorker._unwrap_leaked_example_brackets
+dropped_content = OllamaWorker._translation_dropped_content
 
 
 # ── _strip_spurious_br ─────────────────────────────────────────────────────────
@@ -337,4 +340,218 @@ def test_heal_known_artifacts_also_covers_leaked_example_brackets():
     src = "Flirt Cooldown <Token=CurrentFlirt>"
     tgt = "[유혹] 재사용 대기시간 <Token=CurrentFlirt>"
     assert heal(tgt, src) == "유혹 재사용 대기시간 <Token=CurrentFlirt>"
+
+
+# ── _translation_dropped_content ────────────────────────────────────────────────
+# Real-world failure with a small/quantized local model (gemma4:12b-it-qat via
+# Ollama): given "Admire the artefacts [Animation]", the response was sometimes
+# just "[Animation]" -- the translatable phrase vanished entirely, but this
+# wasn't caught (non-empty, not a source echo) and was saved as a "success".
+
+def test_reported_bug_admire_the_artefacts():
+    assert dropped_content("Admire the artefacts [Animation]", "[Animation]")
+
+
+def test_reported_bug_various_animation_marker_strings():
+    for src, bad in [
+        ("Beg [Animation]", "[Animation]"),
+        ("Repair [Animation]", "[Animation]"),
+        ("Rummage through this [Animation]", "[Animation]"),
+    ]:
+        assert dropped_content(src, bad), (src, bad)
+
+
+def test_successful_translation_not_flagged():
+    # This one actually succeeded in the same batch -- must not be flagged.
+    assert not dropped_content("Arms crossed [Animation]", "팔짱을 낀 채 [Animation]")
+
+
+def test_source_that_is_only_a_tag_not_flagged():
+    # Nothing was ever supposed to be translated here.
+    assert not dropped_content("[Animation]", "[Animation]")
+
+
+def test_alias_tag_variant_also_detected():
+    # The same failure mode with a different structural token shape.
+    assert dropped_content("Repair the <Alias=ShipPart> now.", "<Alias=ShipPart>")
+
+
+def test_empty_translation_not_flagged_here():
+    # Empty output is a distinct, already-handled failure mode (EMPTY_TRANSLATION);
+    # this guard only concerns "non-empty but content vanished".
+    assert not dropped_content("Something to translate.", "")
+
+
+def test_dropped_content_noop_on_empty_original():
+    assert not dropped_content("", "[Animation]")
+
+
+def test_bracket_wrapped_korean_translation_not_flagged():
+    # Verification finding: a translation that EXISTS but was cosmetically
+    # bracket-wrapped by the model ("[앉기] [Animation]") is content, not a
+    # dropped-content failure — it must be left to the unwrap pipeline, not
+    # hard-failed here. The strip regex is printable-ASCII-only for brackets.
+    assert not dropped_content("Sit [Animation]", "[앉기] [Animation]")
+    assert not dropped_content("Flirt [Animation]", "[유혹] [Animation]")
+
+
+def test_preflight_cache_self_heals_poisoned_entry(qapp_or_skip=None):
+    # Verification finding: the batch PRE-FLIGHT cache path (where most cache
+    # hits are served during Translate All) previously had no poisoned-entry
+    # check at all — a tag-only "[Animation]" entry written by an older run
+    # was replayed as a "cache" success forever, bypassing the self-heal in
+    # _translate_single entirely.
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from gui.translation_cache import TranslationCache
+    from PySide6.QtWidgets import QApplication
+    import tempfile
+    from pathlib import Path
+    QApplication.instance() or QApplication([])
+
+    cache = TranslationCache(Path(tempfile.mkdtemp()) / "cache.json")
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False, max_workers=1)
+    w.translation_cache = cache
+    w.translation_memory = None
+    w.glossary_manager = None
+
+    req = TranslationRequest(
+        index=0, string_id=10, original_text="Beg [Animation]",
+        source_lang="en", target_lang="ko",
+    )
+    key = TranslationCache.make_key(
+        req.original_text, w.model, "en", "ko", w._settings_hash_for(req.original_text)
+    )
+    cache.set(key, "[Animation]")  # poisoned entry from an older run
+
+    results = []
+    w.translation_ready.connect(lambda idx, text, sid, src: results.append((text, src)))
+    with patch.object(OllamaWorker, "_stream_ollama", return_value="구걸하다 [Animation]"):
+        w.translate_batch([req])
+
+    assert results == [("구걸하다 [Animation]", "api")]
+    assert cache.get(key) == "구걸하다 [Animation]"
+
+
+def test_preflight_cache_still_serves_good_entries(qapp_or_skip=None):
+    # Regression guard for the fix above: a GOOD cached entry must still be
+    # served from pre-flight without touching the API.
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from gui.translation_cache import TranslationCache
+    from PySide6.QtWidgets import QApplication
+    import tempfile
+    from pathlib import Path
+    QApplication.instance() or QApplication([])
+
+    cache = TranslationCache(Path(tempfile.mkdtemp()) / "cache.json")
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False, max_workers=1)
+    w.translation_cache = cache
+    w.translation_memory = None
+    w.glossary_manager = None
+
+    req = TranslationRequest(
+        index=0, string_id=11, original_text="Beg [Animation]",
+        source_lang="en", target_lang="ko",
+    )
+    key = TranslationCache.make_key(
+        req.original_text, w.model, "en", "ko", w._settings_hash_for(req.original_text)
+    )
+    cache.set(key, "구걸하다 [Animation]")
+
+    results = []
+    w.translation_ready.connect(lambda idx, text, sid, src: results.append((text, src)))
+    with patch.object(
+        OllamaWorker, "_stream_ollama",
+        side_effect=AssertionError("API must not be called for a good cache hit"),
+    ):
+        w.translate_batch([req])
+
+    assert results == [("구걸하다 [Animation]", "cache")]
+
+
+def test_full_pipeline_retries_once_and_recovers(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    import gui.settings_dialog  # ensure QApplication-dependent imports resolve
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=1, original_text="Admire the artefacts [Animation]",
+        source_lang="en", target_lang="ko",
+    )
+    calls = {"n": 0}
+
+    def fake_stream(payload, timeout):
+        calls["n"] += 1
+        return "[Animation]" if calls["n"] == 1 else "유물을 감상하다 [Animation]"
+
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=fake_stream):
+        result = w._translate_single(req)
+
+    assert calls["n"] == 2
+    assert result == "유물을 감상하다 [Animation]"
+
+
+def test_full_pipeline_fails_when_retry_also_drops_content(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=2, original_text="Beg [Animation]",
+        source_lang="en", target_lang="ko",
+    )
+    with patch.object(OllamaWorker, "_stream_ollama", return_value="[Animation]"):
+        result = w._translate_single(req)
+
+    # Must be a genuine failure (None), NEVER silently saved as "[Animation]".
+    assert result is None
+
+
+def test_poisoned_cache_entry_self_heals(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from gui.translation_cache import TranslationCache
+    from PySide6.QtWidgets import QApplication
+    import tempfile
+    from pathlib import Path
+    QApplication.instance() or QApplication([])
+
+    cache = TranslationCache(Path(tempfile.mkdtemp()) / "cache.json")
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False)
+    w.translation_cache = cache
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=3, original_text="Beg [Animation]",
+        source_lang="en", target_lang="ko",
+    )
+    key = TranslationCache.make_key(
+        req.original_text, w.model, req.source_lang, req.target_lang,
+        w._settings_hash_for(req.original_text),
+    )
+    cache.set(key, "[Animation]")  # simulates a pre-fix poisoned entry
+
+    with patch.object(OllamaWorker, "_stream_ollama", return_value="구걸하다 [Animation]"):
+        result = w._translate_single(req)
+
+    assert result == "구걸하다 [Animation]"
+    assert cache.get(key) == "구걸하다 [Animation]"
+
 

@@ -1031,30 +1031,41 @@ class OllamaWorker(QObject):
         _preload_ptbr_dict()
 
     def _compute_settings_hash(self) -> str:
-        """Short hash of glossary + prompt version.
+        """Refresh the string-independent hash components and return the
+        BASE hash (prompt version + persona + rules -- no glossary).
 
-        When this value changes, cache keys change so old translations
-        are automatically re-translated.
-        - glossary changes -> hash changes automatically
-        - prompt rule changes -> bump PROMPT_VERSION below
+        The glossary no longer enters this global hash: hashing the entire
+        glossary into every key meant a single term edit invalidated the
+        whole cache, including the vast majority of strings that don't
+        contain that term. Each string's cache key now mixes in only the
+        glossary pairs that actually match that string -- see
+        _settings_hash_for(). The base hash is kept for diagnostics.
+        - prompt persona/custom-rules changes -> all hashes change (correct:
+          they affect every prompt)
+        - prompt-construction changes -> bump gui.settings_hash.PROMPT_VERSION
         """
-        import hashlib as _hl
-        PROMPT_VERSION = 5  # bumped: DEFAULT_CUSTOM_RULES (rules 10-11) translated to Korean
-        parts = [f"pv{PROMPT_VERSION}", f"persona={_active_persona}", f"rules={_active_custom_rules}"]
-        if self.glossary_manager is not None:
-            try:
-                # GlossaryManager exposes all_entries() -> [(scope, entry)];
-                # the previous get_all_entries() call raised AttributeError,
-                # was swallowed by the except below, and silently EXCLUDED the
-                # glossary from this hash -- so editing the glossary never
-                # invalidated cached translations (confirmed by test).
-                entries = [e for _scope, e in self.glossary_manager.all_entries()]
-                for e in sorted(entries, key=lambda x: (x.source_term, x.target_term)):
-                    parts.append(f"{e.source_term}={e.target_term}")
-            except Exception:
-                pass
-        combined = "\n".join(parts)
-        return _hl.sha256(combined.encode("utf-8")).hexdigest()[:12]
+        from gui.settings_hash import base_settings_parts, settings_hash_for_text
+        self._base_parts = base_settings_parts(_active_persona, _active_custom_rules)
+        return settings_hash_for_text(None, "", self._base_parts)
+
+    def _settings_hash_for(self, source_text: str) -> str:
+        """Per-string settings hash: base parts + the glossary pairs matching
+        *source_text* (exactly what build_prompt_snippet() would inject for
+        it). Editing a glossary term therefore invalidates only the strings
+        that contain it. Shared contract with OpenAICompatWorker /
+        ClaudeTranslationWorker and main_window's string-editor
+        write-through, so reads and writes always agree on the key."""
+        from gui.settings_hash import base_settings_parts, settings_hash_for_text
+        # Base parts are rebuilt from the LIVE prompt overrides on every call
+        # (cheap: two f-strings + sha256) instead of using a batch-start
+        # snapshot: the string-editor write-through can fire before any batch
+        # ran, or after the Prompt Editor changed persona/rules mid-session,
+        # and a stale snapshot would silently write under a key no future
+        # batch would ever read.
+        return settings_hash_for_text(
+            self.glossary_manager, source_text,
+            base_settings_parts(_active_persona, _active_custom_rules),
+        )
 
     def _get_model_config(self, model_name: Optional[str] = None) -> Dict[str, Any]:
         """Return the best-matching config for *model_name* (or the worker's model).
@@ -1306,16 +1317,32 @@ class OllamaWorker(QObject):
             if not is_retry and self.translation_cache:
                 cache_key = TranslationCache.make_key(
                     req.original_text, self.model, req.source_lang, req.target_lang,
-                    settings_hash=self._settings_hash,
+                    settings_hash=self._settings_hash_for(req.original_text),
                 )
                 cached = self.translation_cache.get(cache_key)
                 if cached:
                     cached = self._heal_known_artifacts(cached, req.original_text)
-                    self.translation_ready.emit(req.index, cached, req.string_id, "cache")
-                    successful += 1
-                    completed_count += 1
-                    self.progress.emit(completed_count, total)
-                    continue
+                    # Self-heal poisoned entries on THIS path too, not only in
+                    # _translate_single: pre-flight is where most cache hits
+                    # are served during Translate All, so without these checks
+                    # an untranslated echo or a tag-only value ("[Animation]")
+                    # written by an older run would be replayed as a "cache"
+                    # success forever. Evict and fall through so the string
+                    # joins the pending list for a fresh AI translation.
+                    if self._is_untranslated_echo(
+                        req.original_text, cached, req.source_lang, req.target_lang
+                    ) or self._translation_dropped_content(req.original_text, cached):
+                        logger.info(
+                            "String %s: cached value is poisoned (echo or dropped "
+                            "content) — evicting and retranslating", req.string_id
+                        )
+                        self.translation_cache.delete(cache_key)
+                    else:
+                        self.translation_ready.emit(req.index, cached, req.string_id, "cache")
+                        successful += 1
+                        completed_count += 1
+                        self.progress.emit(completed_count, total)
+                        continue
 
             # Deduplication: retries always go through (they need fresh results)
             if not is_retry:
@@ -1431,6 +1458,20 @@ class OllamaWorker(QObject):
                         completed_count += 1 + len(req_followers)
                         self.error.emit(
                             f"Untranslated echo for string {req.string_id} — not saved"
+                        )
+                        self.progress.emit(completed_count, total)
+                    elif translated and self._translation_dropped_content(
+                        req.original_text, translated
+                    ):
+                        # Same belt-and-braces reasoning as the echo guard above, for
+                        # the "only the preserved tag came back" failure mode.
+                        # _translate_single already retries once and converts a
+                        # still-bad result to None; this catches any path that
+                        # reaches here with dropped content anyway.
+                        failed += 1 + len(req_followers)
+                        completed_count += 1 + len(req_followers)
+                        self.error.emit(
+                            f"Dropped content for string {req.string_id} — not saved"
                         )
                         self.progress.emit(completed_count, total)
                     elif translated:
@@ -1810,22 +1851,31 @@ class OllamaWorker(QObject):
         if self.translation_cache is not None:
             cache_key = TranslationCache.make_key(
                 req.original_text, self.model, req.source_lang, req.target_lang,
-                settings_hash=self._settings_hash,
+                settings_hash=self._settings_hash_for(req.original_text),
             )
             if not is_retry:
                 cached = self.translation_cache.get(cache_key)
                 if cached is not None:
                     cached = self._heal_known_artifacts(cached, req.original_text)
-                    # Self-heal a poisoned cache: an untranslated echo written by an
-                    # older run (before the echo guard existed) must not be replayed.
-                    # Evict it and fall through to a fresh AI translation instead of
-                    # serving the bad value on every re-run.
+                    # Self-heal a poisoned cache: an older run may have saved an
+                    # untranslated echo (before the echo guard existed) or a
+                    # response that dropped everything except a preserved tag
+                    # (before the dropped-content guard existed). Either must
+                    # not be replayed — evict and fall through to a fresh
+                    # AI translation instead of serving the bad value forever.
                     if self._is_untranslated_echo(
                         req.original_text, cached, req.source_lang, req.target_lang
                     ):
                         logger.info(
                             "String %s: cached value is an untranslated echo — evicting "
                             "and retranslating", req.string_id
+                        )
+                        self.translation_cache.delete(cache_key)
+                    elif self._translation_dropped_content(req.original_text, cached):
+                        logger.info(
+                            "String %s: cached value dropped translatable content "
+                            "(only a preserved tag remains) — evicting and "
+                            "retranslating", req.string_id
                         )
                         self.translation_cache.delete(cache_key)
                     else:
@@ -2374,6 +2424,53 @@ class OllamaWorker(QObject):
                 # count — never make the translation worse than the single-call one.
                 if pp is not None and self._nl_count(pp) == self._nl_count(_orig_full):
                     translated = pp
+
+            # Dropped-content guard: the model sometimes returns ONLY the
+            # preserved tag/placeholder and drops the actual phrase to
+            # translate (e.g. "Admire the artefacts [Animation]" → just
+            # "[Animation]"). One retry with an explicit hint through the
+            # normal pipeline (same glossary/persona/rules — not a stripped
+            # hardcoded prompt, since this failure is language-pair-agnostic).
+            # If the retry ALSO drops content, fail rather than silently save
+            # a truncated translation as a "success".
+            if translated and self._translation_dropped_content(req.original_text, translated):
+                if not is_retry:
+                    logger.info(
+                        "String %s: response kept only the preserved tag(s) and "
+                        "dropped the translatable text — retrying once", req.string_id
+                    )
+                    from dataclasses import replace as _dc_replace_dc
+                    retry_req = _dc_replace_dc(
+                        req,
+                        retry_hint=(
+                            "\n\n중요: 직전 응답이 보호된 태그/코드만 남기고 그 앞뒤에 있던 "
+                            "실제 번역 대상 문구를 통째로 누락했습니다. 태그를 단독으로 출력하지 "
+                            "말고, 태그 주변의 원문 내용도 반드시 함께 번역하여 포함하세요."
+                        ),
+                    )
+                    retried = self._translate_single(retry_req)
+                    # SKIP_SIGNAL must never be adopted as a translation here:
+                    # falling through with it would cache the sentinel string.
+                    if (
+                        retried
+                        and retried != SKIP_SIGNAL
+                        and not self._translation_dropped_content(
+                            req.original_text, retried
+                        )
+                    ):
+                        translated = retried
+                    else:
+                        logger.warning(
+                            "String %s: retry still dropped content — treating as "
+                            "failure (not saved or cached)", req.string_id
+                        )
+                        return None
+                else:
+                    logger.warning(
+                        "String %s: retry still dropped content — treating as "
+                        "failure (not saved or cached)", req.string_id
+                    )
+                    return None
 
             # Final guard: a verbatim echo of a source that still carries source-language
             # content (Russian-only letters/words for ru→uk, Latin words for en→uk) was
@@ -3473,6 +3570,58 @@ class OllamaWorker(QObject):
     def _norm_for_echo(s: str) -> str:
         """Whitespace-collapsed, case-folded form for echo comparison."""
         return re.sub(r"\s+", " ", s.strip()).casefold()
+
+    # ── Dropped-content guard ────────────────────────────────────────────────────
+    # Structural placeholder/tag shapes that TermProtector treats as "always
+    # protect" (see TermProtector.STRUCTURAL_PATTERNS) -- kept as a standalone
+    # regex here so _translation_dropped_content() can strip them from raw
+    # text WITHOUT running full term protection (glossary/category matching),
+    # which matters for the cache-hit self-heal check that runs before
+    # protection would otherwise happen for that string.
+    _STRUCTURAL_STRIP_RE = re.compile(
+        r"\[\[[^\]]*\]\]"                                   # [[TK_...]] / [[STRUCT_BREAK_*]]
+        # bracket_id: [Animation], [Attack], [OPTIMIZED]. Printable-ASCII only
+        # (mirrors TermProtector's intent of protecting game CODES): a
+        # bracket span holding Hangul/Cyrillic (e.g. a spuriously bracketed
+        # Korean translation "[앉기]") is CONTENT, not a token — stripping it
+        # would false-flag "content dropped" for a translation that exists
+        # but was cosmetically bracket-wrapped by the model.
+        r"|\[[!-~]+\]"
+        r"|</?[a-zA-Z][^>]*/?>"                              # xml/alias/bethesda placeholder tags
+        r"|\{[^}]*\}"                                        # brace_var
+        r"|%[-+0#]*\d*(?:\.\d+)?[sdfoxXciuFeEgGp%]"          # printf var
+    )
+
+    @classmethod
+    def _content_outside_tokens(cls, text: str) -> str:
+        """*text* with all structural placeholder/tag/bracket-id substrings
+        removed, leaving only what should be genuinely translatable prose."""
+        return cls._STRUCTURAL_STRIP_RE.sub("", text or "")
+
+    @classmethod
+    def _translation_dropped_content(cls, original: str, translated: str) -> bool:
+        """True when *translated* looks like just the restored tag(s)/token(s)
+        with the actual translatable phrase missing entirely.
+
+        Confirmed real-world failure with small/quantized local models (e.g.
+        gemma4:12b-it-qat via Ollama): given "Admire the artefacts [Animation]",
+        the model sometimes echoes back ONLY "[Animation]" and drops the
+        leading phrase completely. The result is non-empty and not a copy of
+        the source either, so it passed both the emptiness check and
+        _is_untranslated_echo() and was silently accepted as a successful
+        translation. This checks specifically for "everything outside the
+        preserved tags vanished," independent of source/target language.
+        """
+        if not translated:
+            return False
+        src_content = cls._content_outside_tokens(original)
+        # Require a MEANINGFUL amount of source content outside the tokens —
+        # avoids false positives when the source is itself just a tag plus
+        # stray punctuation (nothing was ever supposed to be translated).
+        if sum(1 for c in src_content if c.isalnum()) < 2:
+            return False
+        trans_content = cls._content_outside_tokens(translated).strip()
+        return not trans_content or not any(c.isalnum() for c in trans_content)
 
     @classmethod
     def _is_untranslated_echo(
