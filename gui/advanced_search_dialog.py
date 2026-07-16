@@ -315,6 +315,21 @@ class AdvancedSearchDialog(QDialog):
                 continue
             if n > 0 and new_trans != old_trans:
                 model.set_translated_text(row_idx, new_trans)
+                # set_translated_text() alone never reaches the cache — the
+                # same gap already fixed once for the string-edit popup and
+                # the inline in-table edit path (see StringTableModel.setData
+                # and the StringEditDialog handler in this file's sibling
+                # string_table.py). Replace All was the third caller of
+                # set_translated_text() and had the identical bug: a bulk
+                # fix here never stuck, so re-translating (or another row
+                # sharing the same source text) would silently regenerate
+                # the un-corrected wording. Emitting this is what
+                # main_window._on_string_corrected listens for to write the
+                # correction into the translation cache under the key the
+                # workers actually read.
+                model.string_manually_corrected.emit(
+                    row_idx, row_data.get("original", "")
+                )
                 replaced_count += 1
                 total_subs += n
 
