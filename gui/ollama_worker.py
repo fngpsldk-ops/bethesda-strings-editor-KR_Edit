@@ -2434,10 +2434,24 @@ class OllamaWorker(QObject):
             # If the retry ALSO drops content, fail rather than silently save
             # a truncated translation as a "success".
             if translated and self._translation_dropped_content(req.original_text, translated):
-                if not is_retry:
+                # First recovery: peel the structural tokens off and translate
+                # the bare core phrase — the tag is what derails the model, so
+                # removing it fixes the cause. Hinted retries were observed to
+                # fail 22/22 in a real batch, so they are only a last resort.
+                core_fixed = None
+                if req.string_id != -1:  # never inside a core sub-request
                     logger.info(
-                        "String %s: response kept only the preserved tag(s) and "
-                        "dropped the translatable text — retrying once", req.string_id
+                        "String %s: response kept only the preserved tag(s) — "
+                        "retranslating the bare core phrase without them",
+                        req.string_id,
+                    )
+                    core_fixed = self._translate_stripped_core(req)
+                if core_fixed:
+                    translated = core_fixed
+                elif not is_retry:
+                    logger.info(
+                        "String %s: core retranslation not applicable/failed — "
+                        "retrying once with an explicit hint", req.string_id
                     )
                     from dataclasses import replace as _dc_replace_dc
                     retry_req = _dc_replace_dc(
@@ -2461,8 +2475,8 @@ class OllamaWorker(QObject):
                         translated = retried
                     else:
                         logger.warning(
-                            "String %s: retry still dropped content — treating as "
-                            "failure (not saved or cached)", req.string_id
+                            "String %s: all recovery attempts still dropped content — "
+                            "treating as failure (not saved or cached)", req.string_id
                         )
                         return None
                 else:
@@ -2471,6 +2485,58 @@ class OllamaWorker(QObject):
                         "failure (not saved or cached)", req.string_id
                     )
                     return None
+
+            # Dropped-clause guard (best-effort, not a hard-failure signal like
+            # the dropped-content guard above): the source contains a
+            # subordinating conjunction (after/before/when/...) whose clause
+            # doesn't appear to have made it into the translation, even though
+            # the main clause translated fine and real content is present.
+            # Confirmed real-world case: "<Alias...>'s inventory will open
+            # after exiting the terminal." -> "<Alias...>의 인벤토리가 열립니다."
+            # (the entire "after exiting the terminal" clause vanished). Unlike
+            # dropped-content, this signal can theoretically false-positive on
+            # a valid translation phrased without one of the listed
+            # connectives, so a retry that doesn't fix it is NOT treated as a
+            # failure — the original attempt is kept rather than discarded on
+            # an uncertain signal.
+            if translated and not is_retry:
+                missing_marker = self._translation_dropped_clause(
+                    req.original_text, translated
+                )
+                if missing_marker:
+                    logger.info(
+                        "String %s: source has a '%s' clause that appears "
+                        "missing from the translation — retrying once with a "
+                        "hint", req.string_id, missing_marker,
+                    )
+                    from dataclasses import replace as _dc_replace_clause
+                    clause_retry_req = _dc_replace_clause(
+                        req,
+                        retry_hint=(
+                            f"\n\n중요: 원문의 '{missing_marker}' 절(조건문/시간 관련 부분)이 "
+                            "번역에서 누락된 것 같습니다. 문장에 포함된 모든 절과 세부 내용을 "
+                            "빠짐없이 반영하여 다시 번역하세요."
+                        ),
+                    )
+                    retried_clause = self._translate_single(clause_retry_req)
+                    if (
+                        retried_clause
+                        and retried_clause != SKIP_SIGNAL
+                        and not self._translation_dropped_content(
+                            req.original_text, retried_clause
+                        )
+                        and not self._translation_dropped_clause(
+                            req.original_text, retried_clause
+                        )
+                    ):
+                        translated = retried_clause
+                    else:
+                        logger.info(
+                            "String %s: retry did not resolve the '%s' clause "
+                            "check — keeping the original attempt (signal is "
+                            "heuristic, not treated as a failure)",
+                            req.string_id, missing_marker,
+                        )
 
             # Final guard: a verbatim echo of a source that still carries source-language
             # content (Russian-only letters/words for ru→uk, Latin words for en→uk) was
@@ -3333,9 +3399,28 @@ class OllamaWorker(QObject):
         # Garbage detection
         if original_text and text:
             orig_len = len(original_text.strip())
-            text_len = len(text.strip())
+            # The length-ratio thresholds below were tuned for Cyrillic
+            # targets, whose character counts roughly match Latin. Korean /
+            # CJK scripts are 2-3x denser: a 13-char English phrase
+            # ("Casually look") legitimately becomes a 4-char Korean word
+            # ("구경하기"), which the raw ratios classified as garbage and
+            # silently wiped — surfacing as "Empty response" errors in en→ko
+            # batches (confirmed against a real UsableAnimationMarkers.esm
+            # run). Weight CJK characters as 2.5 Latin-equivalents so the
+            # ratio rules keep their meaning across scripts.
+            text_stripped_gd = text.strip()
+            text_len = int(sum(
+                2.5 if (
+                    "\uac00" <= c <= "\ud7a3"    # Hangul syllables
+                    or "\u1100" <= c <= "\u11ff"  # Hangul jamo
+                    or "\u3130" <= c <= "\u318e"  # Hangul compat jamo
+                    or "\u4e00" <= c <= "\u9fff"  # CJK unified ideographs
+                    or "\u3040" <= c <= "\u30ff"  # Hiragana / Katakana
+                ) else 1
+                for c in text_stripped_gd
+            ))
 
-            if text_len == 1 and orig_len > 1:
+            if len(text_stripped_gd) == 1 and text_len <= 1 and orig_len > 1:
                 return ""
             if (
                 orig_len <= 6
@@ -3621,7 +3706,143 @@ class OllamaWorker(QObject):
         if sum(1 for c in src_content if c.isalnum()) < 2:
             return False
         trans_content = cls._content_outside_tokens(translated).strip()
-        return not trans_content or not any(c.isalnum() for c in trans_content)
+        if not trans_content or not any(c.isalnum() for c in trans_content):
+            return True
+        # Partial gutting: the model kept the tag and translated only a
+        # fragment. Confirmed in the wild: "Inventory this [Animation]" ->
+        # "이 [Animation]" (only "this" survived as "이"; the verb vanished).
+        # A single alnum char of content for a source phrase of >= 6 letters
+        # cannot be a complete Korean translation; legitimately terse Korean
+        # ("Read a book" -> "독서") is 2+ chars and stays unflagged.
+        src_alpha = sum(1 for c in src_content if c.isalpha())
+        trans_alnum = sum(1 for c in trans_content if c.isalnum())
+        return src_alpha >= 6 and trans_alnum <= 1
+
+    # English subordinating conjunctions and plausible Korean clause-connective
+    # renderings. Best-effort and intentionally permissive (multiple candidates
+    # per marker) — this is a heuristic signal for "worth a retry," not a
+    # certain-failure signal like _translation_dropped_content. A valid
+    # translation can express the same clause without literally containing one
+    # of these substrings, so callers must never hard-fail on this alone.
+    _CLAUSE_MARKER_RE = re.compile(
+        r"\b(after|before|when|once|while|until|unless|although|though|because|since|if)\b",
+        re.IGNORECASE,
+    )
+    _CLAUSE_KO_EQUIVALENTS = {
+        "after": ("후", "다음", "뒤", "고서", "나서"),
+        "before": ("전", "앞서"),
+        "when": ("때", "하면", "면서", "자"),
+        "once": ("하면", "되면", "자마자"),
+        "while": ("동안", "면서", "중"),
+        "until": ("까지",),
+        "unless": ("않으면", "아니면", "않는 한"),
+        "although": ("지만", "더라도", "에도"),
+        "though": ("지만", "더라도", "에도"),
+        "because": ("때문", "므로", "니까", "라서"),
+        "since": ("때문", "므로", "니까", "이후"),
+        "if": ("면", "다면", "라면"),
+    }
+
+    @classmethod
+    def _translation_dropped_clause(cls, original: str, translated: str) -> Optional[str]:
+        """Return the first English subordinating conjunction whose clause
+        looks dropped from *translated*, or None if none found / accounted for.
+
+        Confirmed real-world failure with gemma4:26b-a4b-it-qat: source
+        "<Alias...>'s inventory will open after exiting the terminal." came
+        back as "<Alias...>의 인벤토리가 열립니다." — the main clause is
+        translated correctly, but the entire "after exiting the terminal"
+        clause vanished. Neither existing guard catches this: the tag padding
+        on both sides keeps the raw length ratio around 0.5 (nowhere near
+        quality_checker's 0.20 SUSPICIOUSLY_SHORT threshold), and
+        _translation_dropped_content() only fires when content outside tags is
+        completely empty — here there IS real translated content, just an
+        incomplete subset of the source's clauses.
+
+        This targets the specific linguistic feature (a clause connective)
+        instead of a blunt length ratio, which is what makes it precise enough
+        to act on: unlike raw ratios, it isn't fooled by tag padding or by
+        Korean's normal compression relative to English.
+        """
+        if not translated:
+            return None
+        src_content = cls._content_outside_tokens(original)
+        trans_content = cls._content_outside_tokens(translated)
+        if sum(1 for c in trans_content if c.isalnum()) < 2:
+            return None  # let _translation_dropped_content handle empty results
+        for m in cls._CLAUSE_MARKER_RE.finditer(src_content):
+            word = m.group(1).lower()
+            equivalents = cls._CLAUSE_KO_EQUIVALENTS.get(word)
+            if equivalents and not any(eq in trans_content for eq in equivalents):
+                return word
+        return None
+
+    def _translate_stripped_core(self, req: "TranslationRequest") -> Optional[str]:
+        """Recovery path for dropped-content failures: peel leading/trailing
+        structural tokens off the source, translate the bare core phrase
+        alone, and reattach the tokens verbatim.
+
+        Rationale: hinted retries proved useless for this failure mode in a
+        real batch (22/22 retries still returned only the tag) -- the tag
+        itself is what derails small local models on these short strings.
+        Removing it from the model's view fixes the cause instead of asking
+        the model to try harder. Covers the dominant shapes "phrase [Tag]"
+        and "[Tag] phrase" (tokens as a contiguous prefix and/or suffix);
+        interior tokens are left to the hinted-retry fallback because the
+        translated word order no longer maps to the token position.
+
+        Returns the reassembled translation, or None when not applicable or
+        when the core translation itself failed validation.
+        """
+        text = req.original_text or ""
+        spans = [m.span() for m in self._STRUCTURAL_STRIP_RE.finditer(text)]
+        if not spans:
+            return None
+
+        # Grow a contiguous token run from the left edge (tokens separated
+        # only by whitespace), then symmetrically from the right edge.
+        lead_end = 0
+        for s, e in spans:
+            if text[lead_end:s].strip() == "":
+                lead_end = e
+            else:
+                break
+        trail_start = len(text)
+        for s, e in reversed(spans):
+            if e <= lead_end:
+                break
+            if text[e:trail_start].strip() == "":
+                trail_start = s
+            else:
+                break
+
+        core = text[lead_end:trail_start]
+        if not core.strip():
+            return None  # nothing but tokens — all-protected path owns this
+        if self._STRUCTURAL_STRIP_RE.search(core):
+            return None  # interior tokens — reassembly would misplace them
+        if sum(1 for c in core if c.isalnum()) < 2:
+            return None
+
+        from dataclasses import replace as _dc_core
+        core_req = _dc_core(
+            req, original_text=core.strip(), retry_hint="", string_id=-1
+        )
+        result = self._translate_single(core_req)
+        if (
+            not result
+            or result == SKIP_SIGNAL
+            or self._translation_dropped_content(core, result)
+            or self._is_untranslated_echo(core, result, req.source_lang, req.target_lang)
+        ):
+            return None
+
+        # Reattach the token runs with the source's own whitespace, and keep
+        # the core's surrounding whitespace shape (strip() was only for the
+        # sub-request; the slice boundaries carry the real spacing).
+        lead_ws_end = lead_end + (len(core) - len(core.lstrip()))
+        trail_ws_start = trail_start - (len(core) - len(core.rstrip()))
+        return text[:lead_ws_end] + result.strip() + text[trail_ws_start:]
 
     @classmethod
     def _is_untranslated_echo(
@@ -3652,6 +3873,31 @@ class OllamaWorker(QObject):
                 return False
         if sl.startswith("en") and tl.startswith("uk"):
             return any(c.isalpha() and c.isascii() for c in source)
+        if tl.startswith("ko"):
+            # Korean translations are written in Hangul (loanwords are
+            # transliterated), so a verbatim Latin-script copy of the source
+            # was never translated. Confirmed in the wild: en->ko echoes like
+            # "Beg [Animation]" -> "Beg [Animation]" were saved as successes
+            # because this method previously had no ko branch at all.
+            # Guards against false positives:
+            #   * content is measured OUTSIDE structural tokens, so a string
+            #     that is entirely tags ("[Animation]") -- legitimately
+            #     returned as-is by the all-protected fast path -- never flags;
+            #   * NoTrans-pattern sources (paths, IDs, pure symbols) never flag;
+            #   * short (<3 letters) or ALL-CAPS content ("DJ", "GPS", "DLC")
+            #     is commonly kept verbatim in Korean localization -- skip.
+            src_stripped = source.strip()
+            if cls._INPUT_NOTRANS_RE.fullmatch(src_stripped):
+                return False
+            content_letters = [
+                c for c in cls._content_outside_tokens(source)
+                if c.isalpha() and c.isascii()
+            ]
+            if len(content_letters) < 3:
+                return False
+            if all(c.isupper() for c in content_letters):
+                return False
+            return True
         # Other language pairs: cannot prove an identical copy is wrong — allow it.
         return False
 

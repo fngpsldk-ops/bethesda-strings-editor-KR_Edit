@@ -472,11 +472,13 @@ def test_preflight_cache_still_serves_good_entries(qapp_or_skip=None):
     assert results == [("구걸하다 [Animation]", "cache")]
 
 
-def test_full_pipeline_retries_once_and_recovers(qapp_or_skip=None):
+def test_full_pipeline_recovers_via_core_strip(qapp_or_skip=None):
+    # Recovery order: dropped content -> core-strip retranslation FIRST
+    # (hinted retry proved useless 22/22 in a real batch and is now only a
+    # fallback for shapes core-strip can't handle, e.g. interior tokens).
     pytest.importorskip("PySide6")
     from unittest.mock import patch
     from gui.ollama_worker import OllamaWorker, TranslationRequest
-    import gui.settings_dialog  # ensure QApplication-dependent imports resolve
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
 
@@ -492,13 +494,48 @@ def test_full_pipeline_retries_once_and_recovers(qapp_or_skip=None):
 
     def fake_stream(payload, timeout):
         calls["n"] += 1
-        return "[Animation]" if calls["n"] == 1 else "유물을 감상하다 [Animation]"
+        if "[Animation]" in payload["prompt"]:
+            return "[Animation]"          # full-string call: tag-only failure
+        return "유물을 감상하다"            # core call (tag removed): succeeds
+
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=fake_stream):
+        result = w._translate_single(req)
+
+    assert calls["n"] == 2  # full attempt + core attempt, no hinted retry needed
+    assert result == "유물을 감상하다 [Animation]"
+
+
+def test_full_pipeline_hinted_retry_fallback_for_interior_tokens(qapp_or_skip=None):
+    # Core-strip only handles contiguous prefix/suffix token runs; an interior
+    # token falls back to the hinted retry, which must still be able to recover.
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=8,
+        original_text="Repair the <Alias=Part> quickly now",
+        source_lang="en", target_lang="ko",
+    )
+    calls = {"n": 0}
+
+    def fake_stream(payload, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "<Alias=Part>"                       # dropped content
+        return "<Alias=Part>을(를) 빠르게 수리하십시오"    # hinted retry succeeds
 
     with patch.object(OllamaWorker, "_stream_ollama", side_effect=fake_stream):
         result = w._translate_single(req)
 
     assert calls["n"] == 2
-    assert result == "유물을 감상하다 [Animation]"
+    assert result == "<Alias=Part>을(를) 빠르게 수리하십시오"
 
 
 def test_full_pipeline_fails_when_retry_also_drops_content(qapp_or_skip=None):
@@ -555,3 +592,255 @@ def test_poisoned_cache_entry_self_heals(qapp_or_skip=None):
     assert cache.get(key) == "구걸하다 [Animation]"
 
 
+
+# ── en→ko echo detection + CJK-aware garbage guard + core-strip recovery ──────
+# From a real UsableAnimationMarkers.esm run: (1) en→ko English echoes
+# ("Beg [Animation]" -> itself) were saved as successes because
+# _is_untranslated_echo had no ko branch; (2) valid terse Korean
+# ("Casually look" -> "구경하기") was wiped by Cyrillic-tuned length ratios,
+# surfacing as "Empty response" errors; (3) hinted retries failed 22/22, so
+# dropped-content recovery now strips the tag and translates the bare core.
+
+echo = OllamaWorker._is_untranslated_echo
+
+
+def test_en_ko_echo_detected():
+    for s in ["Beg [Animation]", "Admire the artefacts [Animation]",
+              "Crouch", "Clean the wall [Animation]", "Seat"]:
+        assert echo(s, s, "en", "ko"), s
+
+
+def test_en_ko_echo_legitimate_keep_cases_not_flagged():
+    assert not echo("DJ", "DJ", "en", "ko")                    # <3 letters
+    assert not echo("GPS", "GPS", "en", "ko")                  # ALL-CAPS acronym
+    assert not echo("[Animation]", "[Animation]", "en", "ko")  # tags only
+    assert not echo("C:\\Games\\file.exe", "C:\\Games\\file.exe", "en", "ko")
+    assert not echo("Beg [Animation]", "구걸 [Animation]", "en", "ko")  # translated
+
+
+def test_partial_gutting_detected():
+    for src in ["Inventory this [Animation]", "Mess with this [Animation]",
+                "Rummage through this [Animation]", "Search this [Animation]"]:
+        assert dropped_content(src, "이 [Animation]"), src
+
+
+def test_terse_but_valid_korean_not_gutted():
+    assert not dropped_content("Read a book [Animation]", "독서 [Animation]")
+    assert not dropped_content("Sweep [Animation]", "청소 [Animation]")
+
+
+def test_cjk_weighted_garbage_guard_keeps_valid_terse_korean(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False)
+    for tr, orig in [("구경하기", "Casually look"), ("웅크리기", "Crouch"),
+                     ("독서", "Read a book"), ("청소하기", "Sweep the floor")]:
+        assert w._clean_translation(tr, "ko", orig, -1) == tr, (tr, orig)
+    # Non-CJK garbage detection unchanged; incomplete 1-char Korean still blocked.
+    assert w._clean_translation("x", "uk", "Casually look", -1) == ""
+    assert w._clean_translation("이", "ko", "Inventory this", -1) == ""
+
+
+def test_core_strip_recovery_suffix_and_prefix_tags(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import TranslationRequest
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    CORE = {"Beg": "구걸하기", "Casually look": "구경하기",
+            "Inventory this": "이것을 조사하기"}
+
+    def realistic(payload, timeout):
+        pr = payload["prompt"]
+        if "[Animation]" in pr:
+            return "[Animation]"  # the real gemma4 failure: tag-only echo
+        for e, k in CORE.items():
+            if e in pr:
+                return k
+        return "번역"
+
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=realistic):
+        assert w._translate_single(TranslationRequest(
+            index=0, string_id=1, original_text="Beg [Animation]",
+            source_lang="en", target_lang="ko")) == "구걸하기 [Animation]"
+        assert w._translate_single(TranslationRequest(
+            index=1, string_id=2, original_text="[Animation] Casually look",
+            source_lang="en", target_lang="ko")) == "[Animation] 구경하기"
+        assert w._translate_single(TranslationRequest(
+            index=2, string_id=3, original_text="Inventory this [Animation]",
+            source_lang="en", target_lang="ko")) == "이것을 조사하기 [Animation]"
+
+
+def test_preflight_evicts_english_echo_and_gutted_cache(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import TranslationRequest
+    from gui.translation_cache import TranslationCache
+    from PySide6.QtWidgets import QApplication
+    import tempfile
+    from pathlib import Path
+    QApplication.instance() or QApplication([])
+
+    def realistic(payload, timeout):
+        pr = payload["prompt"]
+        if "[Animation]" in pr:
+            return "[Animation]"
+        if "Inventory this" in pr:
+            return "이것을 조사하기"
+        return "구걸하기"
+
+    cache = TranslationCache(Path(tempfile.mkdtemp()) / "cache.json")
+    w = OllamaWorker(model="gemma4:12b-it-qat", enable_term_protection=False, max_workers=1)
+    w.translation_cache = cache
+    w.translation_memory = None
+    w.glossary_manager = None
+
+    req = TranslationRequest(index=0, string_id=7,
+                             original_text="Inventory this [Animation]",
+                             source_lang="en", target_lang="ko")
+    key = TranslationCache.make_key(req.original_text, w.model, "en", "ko",
+                                    w._settings_hash_for(req.original_text))
+
+    results = []
+    w.translation_ready.connect(lambda i, txt, sid, src: results.append((txt, src)))
+
+    # Poisoned with the real-world gutted value from the screenshots.
+    cache.set(key, "이 [Animation]")
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=realistic):
+        w.translate_batch([req])
+    assert results == [("이것을 조사하기 [Animation]", "api")]
+    assert cache.get(key) == "이것을 조사하기 [Animation]"
+
+    # Poisoned with an en→ko English echo.
+    results.clear()
+    cache.set(key, "Inventory this [Animation]")
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=realistic):
+        w.translate_batch([req])
+    assert results == [("이것을 조사하기 [Animation]", "api")]
+
+# ── _translation_dropped_clause ─────────────────────────────────────────────
+# Real-world case with gemma4:26b-a4b-it-qat: the main clause translates fine
+# but an entire subordinate clause vanishes. Neither existing guard catches
+# it -- tag padding keeps the raw length ratio ~0.5 (well above
+# quality_checker's 0.20 threshold) and real content IS present (so
+# _translation_dropped_content doesn't fire either). This is a heuristic,
+# best-effort signal: a retry that doesn't fix it must NOT hard-fail the
+# string (unlike dropped-content), since a valid translation can express the
+# same clause without one of the listed connectives.
+
+dropped_clause = OllamaWorker._translation_dropped_clause
+
+
+def test_reported_bug_alias_inventory_after_clause():
+    src = "<Alias.CurrentName=Crew02>'s inventory will open after exiting the terminal."
+    bad = "<Alias.CurrentName=Crew02>의 인벤토리가 열립니다."
+    assert dropped_clause(src, bad) == "after"
+
+
+def test_dropped_clause_not_flagged_when_clause_present():
+    src = "<Alias.CurrentName=Crew02>'s inventory will open after exiting the terminal."
+    good = "<Alias.CurrentName=Crew02>가 터미널을 나간 후에 인벤토리가 열립니다."
+    assert dropped_clause(src, good) is None
+
+
+def test_dropped_clause_alternate_korean_phrasing_accepted():
+    src = "<Alias.CurrentName=Crew02>'s inventory will open after exiting the terminal."
+    good = "<Alias.CurrentName=Crew02>가 터미널에서 나오고 나서 인벤토리가 열립니다."
+    assert dropped_clause(src, good) is None
+
+
+def test_dropped_clause_noop_when_no_marker_in_source():
+    assert dropped_clause("Open the door.", "문을 여십시오.") is None
+
+
+def test_dropped_clause_because_and_if():
+    assert dropped_clause(
+        "The ship is grounded because the reactor failed.", "선박이 접지되었습니다."
+    ) == "because"
+    assert dropped_clause(
+        "The ship is grounded because the reactor failed.",
+        "원자로가 고장났기 때문에 선박이 접지되었습니다.",
+    ) is None
+    assert dropped_clause(
+        "Save the file if you want to keep your progress.", "파일을 저장하십시오."
+    ) == "if"
+    assert dropped_clause(
+        "Save the file if you want to keep your progress.",
+        "진행 상황을 저장하려면 파일을 저장하십시오.",
+    ) is None
+
+
+def test_dropped_clause_defers_to_dropped_content_on_empty_translation():
+    # If the translation content is essentially empty, this check backs off
+    # and lets _translation_dropped_content own that failure mode instead.
+    assert dropped_clause("Wait here after the alarm sounds.", "[Animation]") is None
+
+
+def test_full_pipeline_clause_retry_recovers(qapp_or_skip=None):
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    w = OllamaWorker(model="gemma4:26b-a4b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=1,
+        original_text=(
+            "<Alias.CurrentName=Crew02>'s inventory will open after "
+            "exiting the terminal."
+        ),
+        source_lang="en", target_lang="ko",
+    )
+    calls = {"n": 0}
+
+    def fake_stream(payload, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "<Alias.CurrentName=Crew02>의 인벤토리가 열립니다."
+        return "<Alias.CurrentName=Crew02>가 터미널을 나간 후 인벤토리가 열립니다."
+
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=fake_stream):
+        result = w._translate_single(req)
+
+    assert calls["n"] == 2
+    assert "후" in result
+
+
+def test_full_pipeline_clause_retry_failure_keeps_original_not_hard_fail(qapp_or_skip=None):
+    # Uncertain heuristic signal: if the retry still doesn't add a connective,
+    # the ORIGINAL translation must be kept -- never treated as a failure.
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    w = OllamaWorker(model="gemma4:26b-a4b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=2,
+        original_text=(
+            "<Alias.CurrentName=Crew02>'s inventory will open after "
+            "exiting the terminal."
+        ),
+        source_lang="en", target_lang="ko",
+    )
+    with patch.object(
+        OllamaWorker, "_stream_ollama",
+        return_value="<Alias.CurrentName=Crew02>의 인벤토리가 열립니다.",
+    ):
+        result = w._translate_single(req)
+
+    assert result == "<Alias.CurrentName=Crew02>의 인벤토리가 열립니다."
