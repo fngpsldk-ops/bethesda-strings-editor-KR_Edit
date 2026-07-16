@@ -816,6 +816,45 @@ def test_full_pipeline_clause_retry_recovers(qapp_or_skip=None):
     assert "후" in result
 
 
+def test_full_pipeline_clause_retry_recovers_on_second_attempt(qapp_or_skip=None):
+    # Confirmed real-world case with gemma4:26b-a4b-it-qat: the SAME string
+    # with the SAME hint dropped the clause on the first retry too, and only
+    # succeeded on a second retry -- a single retry (the original
+    # implementation) would have given up here. Total calls: 1 initial +
+    # 2 clause retries = 3.
+    pytest.importorskip("PySide6")
+    from unittest.mock import patch
+    from gui.ollama_worker import OllamaWorker, TranslationRequest
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+
+    w = OllamaWorker(model="gemma4:26b-a4b-it-qat", enable_term_protection=False)
+    w.translation_cache = None
+    w.translation_memory = None
+    w.glossary_manager = None
+    req = TranslationRequest(
+        index=0, string_id=3,
+        original_text=(
+            "<Alias.CurrentName=Crew03>'s inventory will open after "
+            "exiting the terminal."
+        ),
+        source_lang="en", target_lang="ko",
+    )
+    calls = {"n": 0}
+
+    def fake_stream(payload, timeout):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return "<Alias.CurrentName=Crew03>의 인벤토리가 열립니다."
+        return "<Alias.CurrentName=Crew03>가 터미널을 나간 후 인벤토리가 열립니다."
+
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=fake_stream):
+        result = w._translate_single(req)
+
+    assert calls["n"] == 3
+    assert "후" in result
+
+
 def test_full_pipeline_clause_retry_failure_keeps_original_not_hard_fail(qapp_or_skip=None):
     # Uncertain heuristic signal: if the retry still doesn't add a connective,
     # the ORIGINAL translation must be kept -- never treated as a failure.
@@ -837,10 +876,16 @@ def test_full_pipeline_clause_retry_failure_keeps_original_not_hard_fail(qapp_or
         ),
         source_lang="en", target_lang="ko",
     )
-    with patch.object(
-        OllamaWorker, "_stream_ollama",
-        return_value="<Alias.CurrentName=Crew02>의 인벤토리가 열립니다.",
-    ):
+    calls = {"n": 0}
+
+    def fake_stream(payload, timeout):
+        calls["n"] += 1
+        return "<Alias.CurrentName=Crew02>의 인벤토리가 열립니다."
+
+    with patch.object(OllamaWorker, "_stream_ollama", side_effect=fake_stream):
         result = w._translate_single(req)
 
+    # All 3 attempts (1 initial + 2 clause retries) exhausted without adding a
+    # connective -> keep the original, never fail the string.
+    assert calls["n"] == 3
     assert result == "<Alias.CurrentName=Crew02>의 인벤토리가 열립니다."

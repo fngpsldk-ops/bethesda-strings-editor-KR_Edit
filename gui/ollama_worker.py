@@ -2504,11 +2504,14 @@ class OllamaWorker(QObject):
                     req.original_text, translated
                 )
                 if missing_marker:
-                    logger.info(
-                        "String %s: source has a '%s' clause that appears "
-                        "missing from the translation — retrying once with a "
-                        "hint", req.string_id, missing_marker,
-                    )
+                    # Genuinely probabilistic, not deterministic: confirmed in
+                    # the wild with gemma4:26b-a4b-it-qat -- the SAME string
+                    # with the SAME hint dropped the clause on one attempt and
+                    # included it correctly on a later, otherwise identical,
+                    # attempt. A single retry therefore only catches the
+                    # failure some of the time -- try a few times before
+                    # accepting the original as final.
+                    _CLAUSE_RETRY_ATTEMPTS = 2
                     from dataclasses import replace as _dc_replace_clause
                     clause_retry_req = _dc_replace_clause(
                         req,
@@ -2518,24 +2521,35 @@ class OllamaWorker(QObject):
                             "빠짐없이 반영하여 다시 번역하세요."
                         ),
                     )
-                    retried_clause = self._translate_single(clause_retry_req)
-                    if (
-                        retried_clause
-                        and retried_clause != SKIP_SIGNAL
-                        and not self._translation_dropped_content(
-                            req.original_text, retried_clause
+                    recovered = None
+                    for attempt in range(1, _CLAUSE_RETRY_ATTEMPTS + 1):
+                        logger.info(
+                            "String %s: source has a '%s' clause that appears "
+                            "missing from the translation — retry %d/%d with a "
+                            "hint", req.string_id, missing_marker, attempt,
+                            _CLAUSE_RETRY_ATTEMPTS,
                         )
-                        and not self._translation_dropped_clause(
-                            req.original_text, retried_clause
-                        )
-                    ):
-                        translated = retried_clause
+                        retried_clause = self._translate_single(clause_retry_req)
+                        if (
+                            retried_clause
+                            and retried_clause != SKIP_SIGNAL
+                            and not self._translation_dropped_content(
+                                req.original_text, retried_clause
+                            )
+                            and not self._translation_dropped_clause(
+                                req.original_text, retried_clause
+                            )
+                        ):
+                            recovered = retried_clause
+                            break
+                    if recovered:
+                        translated = recovered
                     else:
                         logger.info(
-                            "String %s: retry did not resolve the '%s' clause "
-                            "check — keeping the original attempt (signal is "
-                            "heuristic, not treated as a failure)",
-                            req.string_id, missing_marker,
+                            "String %s: %d retries did not resolve the '%s' "
+                            "clause check — keeping the original attempt "
+                            "(signal is heuristic, not treated as a failure)",
+                            req.string_id, _CLAUSE_RETRY_ATTEMPTS, missing_marker,
                         )
 
             # Final guard: a verbatim echo of a source that still carries source-language
