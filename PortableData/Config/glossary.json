@@ -157843,15 +157843,6 @@
       "id": "8542b222-f046-44eb-953d-307c194a6d50"
     },
     {
-      "source_term": "The Gang's",
-      "target_term": "더 갱스",
-      "category": "",
-      "definition": "",
-      "examples": [],
-      "notes": "",
-      "id": "b3ba90c0-4f9d-4b92-a486-aaf238f99361"
-    },
-    {
       "source_term": "GalBank",
       "target_term": "갤뱅크",
       "category": "",
@@ -157868,6 +157859,60 @@
       "examples": [],
       "notes": "",
       "id": "ca283265-391a-408b-bcdd-2ae01ab100b6"
+    },
+    {
+      "source_term": "The Gang's All Here",
+      "target_term": "The Gang's All Here",
+      "category": "",
+      "definition": "",
+      "examples": [],
+      "notes": "",
+      "id": "c0586fa0-9812-42a2-b724-07c619c8096f"
+    },
+    {
+      "source_term": "inventory",
+      "target_term": "인벤토리",
+      "category": "",
+      "definition": "",
+      "examples": [],
+      "notes": "",
+      "id": "8c630ff7-bbc7-4259-a423-eeefe7d302ae"
+    },
+    {
+      "source_term": "Fallback",
+      "target_term": "Fallback",
+      "category": "",
+      "definition": "",
+      "examples": [],
+      "notes": "",
+      "id": "e35a6e64-0238-4939-b8f3-2707ca8447b8"
+    },
+    {
+      "source_term": "Chunks",
+      "target_term": "청크",
+      "category": "",
+      "definition": "",
+      "examples": [],
+      "notes": "",
+      "id": "a573b269-9be3-416b-a3a5-388c8626c2c5"
+    },
+    {
+      "source_term": "KOd",
+      "target_term": "기절한",
+      "category": "",
+      "definition": "",
+      "examples": [],
+      "notes": "",
+      "id": "f0347150-aa39-41eb-a7f0-b761aeebea82"
+    },
+    {
+      "source_term": "Astrogate",
+      "target_term": "Astrogate",
+      "category": "",
+      "definition": "",
+      "examples": [],
+      "notes": "",
+      "id": "88c465ec-afad-4cbe-a161-cc7d9a521c85"
     }
   ]
 }
