@@ -336,7 +336,19 @@ class ClaudeClient:
 
         response = self._client.messages.create(
             model=self.model,
-            max_tokens=1024,
+            # Was a flat 1024 — too small once the review always writes in
+            # Korean (denser markdown: headers, a numbered issue list, an
+            # explicit register/formality section) AND still needs room for
+            # a full improved-translation code block at the end for longer
+            # source strings (e.g. multi-paragraph diary/journal entries).
+            # Confirmed: the fixed 1024 cut generation off mid-sentence,
+            # right as it reached the improved-translation section — always
+            # the LAST thing requested in the prompt, so it's the first
+            # casualty of running out of budget. Scale with the source length
+            # (the improved translation is roughly as long as the source)
+            # while keeping a generous floor for the review commentary itself,
+            # which doesn't shrink for short strings.
+            max_tokens=min(4096, max(1536, len(original) * 4)),
             system=[{"type": "text", "text": system,
                      "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user}],

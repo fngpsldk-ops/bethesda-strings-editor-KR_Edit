@@ -385,3 +385,86 @@ def test_suggest_prompt_requests_korean_commentary_and_register_check():
     prompt = panel._system_prompt()
     assert "Korean" in prompt and "한국어" in prompt
     assert "반말" in prompt and "존댓말" in prompt
+
+
+# ── Review truncation + history-pollution fixes ─────────────────────────────
+# Real-world bug pair reported together: (1) the improved-translation code
+# block at the end of a review got cut off mid-sentence because max_tokens
+# was a flat 1024, too small once the review always writes in Korean with an
+# explicit register section; (2) the (possibly-truncated) review text was
+# being appended to the shared chat _history, so the NEXT "번역 제안" click
+# sent that unfinished assistant turn as prior conversation and Claude just
+# continued typing the leftover sentence before producing the real
+# suggestion. Fixed by scaling max_tokens with source length and by keeping
+# Review completely out of _history (review_translation() never reads
+# _history in the first place, so appending it there only ever caused harm).
+
+def test_review_max_tokens_scales_with_source_length_and_never_below_old_value():
+    from gui.claude_client import ClaudeClient
+
+    client = ClaudeClient.__new__(ClaudeClient)
+    client.model = "claude-sonnet-4-6"
+    captured = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class R:
+                content = [type("C", (), {"text": "VERDICT: GOOD"})()]
+            return R()
+
+    client._client = type("C", (), {"messages": FakeMessages()})()
+
+    client.review_translation("Open the door.", "문을 여십시오.", "en", "ko")
+    mt_short = captured["max_tokens"]
+    client.review_translation("x" * 2000, "번역", "en", "ko")
+    mt_long = captured["max_tokens"]
+
+    assert mt_short > 1024  # strictly more headroom than the old flat value
+    assert mt_long > mt_short
+    assert mt_long <= 4096  # capped, consistent with the rest of this file
+
+
+def test_review_done_does_not_pollute_chat_history():
+    panel = ClaudeChatPanel()
+    panel.set_current_string(1, "Open the door.", "잘못된번역", source_lang="en", target_lang="ko")
+    assert panel._history == []
+
+    panel._on_review_done("### 개선 번역\n```\n(잘려서 끝난 문장...")
+
+    assert panel._history == []
+
+
+def test_review_done_still_updates_apply_state_without_history():
+    panel = ClaudeChatPanel()
+    panel.set_current_string(1, "Open the door.", "잘못된번역", source_lang="en", target_lang="ko")
+    panel._on_review_done("### 개선 번역\n```\n문을 여십시오.\n```")
+
+    assert panel._history == []
+    assert panel._btn_apply.isEnabled()
+    assert panel._last_reply_raw
+
+    applied = []
+    panel.apply_translation.connect(applied.append)
+    panel._do_apply()
+    assert applied == ["문을 여십시오."]
+
+
+def test_suggest_after_truncated_review_starts_clean():
+    # The actual reported end-to-end symptom: a cut-off review must not leak
+    # into the next Suggest/Chat request's conversation history.
+    panel = ClaudeChatPanel()
+    panel._api_key = "sk-fake"
+    panel.set_current_string(1, "Open the door.", "잘못된번역", source_lang="en", target_lang="ko")
+
+    panel._on_review_done("### 개선 번역\n```\n문을 열...")  # truncated mid-sentence
+    assert panel._history == []
+
+    # Simulate what _do_suggest()/_send_message() would send: only the new
+    # user turn, nothing carried over from the review.
+    with __import__("unittest.mock", fromlist=["patch"]).patch.object(
+        type(panel), "_check_ready", return_value=True
+    ):
+        panel._input_would_be = "Please translate this game string:\n\nSource: Open the door."
+    sent_before_new_turn = list(panel._history)
+    assert sent_before_new_turn == []

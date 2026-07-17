@@ -621,10 +621,20 @@ class ClaudeChatPanel(QDockWidget):
     @Slot(str)
     def _on_review_done(self, text: str) -> None:
         import re
-        self._history.append({"role": "assistant", "content": text})
-        # Same reasoning as _on_reply: keep the raw text so a code-fenced
-        # improved translation in the review (see review_translation()'s
-        # updated prompt) can be applied too, not just Suggest responses.
+        # Deliberately NOT appended to self._history. review_translation() is
+        # a standalone, single-shot call that never reads _history in the
+        # first place, so adding its output there serves no purpose for the
+        # review itself — it only pollutes every SUBSEQUENT Chat/Suggest call
+        # (_send_message sends the full _history as prior turns). Confirmed
+        # real-world consequence: when a review got cut off mid-sentence
+        # (see review_translation()'s max_tokens fix), the next "번역 제안"
+        # click sent that unfinished assistant turn as conversation history,
+        # and Claude did exactly what a truncated turn invites — continued
+        # typing the leftover sentence before producing the actual
+        # suggestion. Keeping Review and Chat/Suggest as separate, isolated
+        # flows (matching how they already use separate system prompts and
+        # separate API calls) avoids this class of bug entirely, not just
+        # the truncation case that surfaced it.
         self._last_reply_raw = text
         self._append_claude(text, prefix="📋 Translation Review")
         self._btn_apply.setEnabled(bool(re.search(r"```", text)))
