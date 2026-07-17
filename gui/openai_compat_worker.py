@@ -31,9 +31,10 @@ from PySide6.QtCore import QMutex, QMutexLocker, QObject, Signal, Slot
 
 logger = logging.getLogger(__name__)
 
-# Bump this when the prompt-construction logic changes in a way that should
-# invalidate cached translations produced by this worker.
-PROMPT_VERSION = 5  # bumped: DEFAULT_CUSTOM_RULES (rules 10-11) translated to Korean
+# Prompt version lives in gui.settings_hash (single source of truth shared by
+# all workers + the string-editor cache write-through). Re-exported here for
+# backward compatibility with existing imports.
+from gui.settings_hash import PROMPT_VERSION  # noqa: E402
 
 
 class OpenAICompatWorker(QObject):
@@ -175,34 +176,46 @@ class OpenAICompatWorker(QObject):
 
     # ── settings hash (cache invalidation) ─────────────────────────────────────
     def _compute_settings_hash(self) -> str:
-        """Short hash of glossary contents + prompt version.
+        """Refresh the string-independent hash components and return the
+        BASE hash (prompt version + persona + rules, no glossary).
 
-        Changing the glossary or bumping PROMPT_VERSION changes this hash, so
-        old cache entries are bypassed and re-translated automatically.
+        The glossary no longer enters this global hash: hashing the entire
+        glossary into every key meant one term edit invalidated the whole
+        cache. Instead, each string's cache key mixes in only the glossary
+        pairs that actually match that string — see _settings_hash_for().
+        The base hash is kept for diagnostics logging.
         """
         from gui.ollama_worker import get_prompt_overrides
+        from gui.settings_hash import base_settings_parts, settings_hash_for_text
         _persona, _rules = get_prompt_overrides()
-        parts = [f"pv{PROMPT_VERSION}", f"persona={_persona}", f"rules={_rules}"]
-        if self.glossary_manager is not None:
-            try:
-                # GlossaryManager exposes all_entries() -> [(scope, entry)];
-                # the previous get_all_entries() call raised AttributeError,
-                # was swallowed by the except below, and silently EXCLUDED the
-                # glossary from this hash -- so editing the glossary never
-                # invalidated cached translations (confirmed by test).
-                entries = [e for _scope, e in self.glossary_manager.all_entries()]
-                for e in sorted(entries, key=lambda x: (x.source_term, x.target_term)):
-                    parts.append(f"{e.source_term}={e.target_term}")
-            except Exception:
-                pass
-        combined = "\n".join(parts)
-        return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:12]
+        self._base_parts = base_settings_parts(_persona, _rules)
+        return settings_hash_for_text(None, "", self._base_parts)
+
+    def _settings_hash_for(self, source_text: str) -> str:
+        """Per-string settings hash: base parts + glossary pairs matching
+        *source_text* (exactly what build_prompt_snippet() injects for it).
+        Editing a glossary term therefore invalidates only the strings that
+        contain it. Also called by main_window's string-editor write-through
+        so manual corrections land under the same key this worker reads.
+
+        Base parts are rebuilt from the LIVE prompt overrides on every call
+        (cheap) rather than a batch-start snapshot: the editor write-through
+        can fire before any batch ran, or after the Prompt Editor changed
+        persona/rules mid-session, and a stale snapshot would write under a
+        key no future batch would ever read."""
+        from gui.ollama_worker import get_prompt_overrides
+        from gui.settings_hash import base_settings_parts, settings_hash_for_text
+        _persona, _rules = get_prompt_overrides()
+        return settings_hash_for_text(
+            self.glossary_manager, source_text,
+            base_settings_parts(_persona, _rules),
+        )
 
     def _make_cache_key(self, source_text: str) -> str:
         """Cache key compatible with the Ollama path (model+langs+settings+text)."""
         raw = (
             f"{self.model}\x00{self.source_lang}\x00{self.target_lang}"
-            f"\x00{self._settings_hash}\x00{source_text}"
+            f"\x00{self._settings_hash_for(source_text)}\x00{source_text}"
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -259,6 +272,11 @@ class OpenAICompatWorker(QObject):
             # Translation memory — exact ID hit, then exact source-text hit,
             # then fuzzy match. Same cascade as OllamaWorker / ClaudeTranslationWorker.
             is_retry = bool(req.retry_hint) or bool(req.fix_translation)
+            # Force-Retranslate (Ctrl+Alt+T) bypasses the CACHE read only (see
+            # TranslationRequest.force_retranslate) -- TM lookup just below
+            # stays gated on is_retry alone, since TM is curated reference
+            # material force-retranslate has no reason to override.
+            bypass_cache = is_retry or req.force_retranslate
             if not is_retry and self.translation_memory:
                 tm_result = self.translation_memory.get_by_id(
                     req.string_id, expected_source=source_text
@@ -276,17 +294,21 @@ class OpenAICompatWorker(QObject):
                     self.progress.emit(done, total)
                     continue
 
-            # Cache lookup. Guarded by is_retry for the exact same reason as
-            # the TM check above: a quality-hint-guided retry exists to get a
-            # DIFFERENT, improved result. The cache stores this worker's own
-            # past output — including whatever got flagged as needing this
-            # retry in the first place — so an unguarded lookup here silently
-            # short-circuits every retry back to the same flawed translation
-            # without ever calling the API again. Confirmed in practice: a
-            # retry_hint-carrying request for already-cached text returned the
-            # stale cached value with zero new API calls.
+            # Cache lookup. Guarded by bypass_cache for the exact same reason
+            # as the TM check above: a quality-hint-guided retry, or an
+            # explicit Force-Retranslate, exists to get a DIFFERENT result.
+            # The cache stores this worker's own past output — including
+            # whatever got flagged as needing this retry, or whatever the
+            # person is explicitly trying to discard via Force-Retranslate —
+            # so an unguarded lookup here silently short-circuits back to the
+            # same (possibly flawed) translation without ever calling the API
+            # again. Confirmed in practice: a retry_hint-carrying request for
+            # already-cached text returned the stale cached value with zero
+            # new API calls; Force-Retranslate had the identical bug before
+            # force_retranslate existed, since clearing a row's own text does
+            # nothing to the separate cache store it gets re-served from.
             cache_key = self._make_cache_key(source_text)
-            if not is_retry and self.translation_cache:
+            if not bypass_cache and self.translation_cache:
                 cached = self.translation_cache.get(cache_key)
                 logger.info(
                     "[DIAG] cache lookup string_id=%s key=%s...  hit=%s  cache_len=%d  settings_hash=%s",
@@ -298,6 +320,11 @@ class OpenAICompatWorker(QObject):
                     done += 1
                     self.progress.emit(done, total)
                     continue
+            elif req.force_retranslate and self.translation_cache:
+                # Evict the superseded entry up front so the fresh result
+                # (cached unconditionally once generated, below) overwrites it.
+                self.translation_cache.delete(cache_key)
+                logger.info("[DIAG] cache entry evicted (force_retranslate) string_id=%s", req.string_id)
             elif is_retry:
                 logger.info("[DIAG] cache lookup SKIPPED (is_retry) string_id=%s", req.string_id)
             else:

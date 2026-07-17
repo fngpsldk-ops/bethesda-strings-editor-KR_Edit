@@ -624,6 +624,17 @@ class TranslationRequest:
     context_note: str = ""  # NLDT developer context note from ESP (explains variables)
     lore_snippet: str = ""  # Lore RAG context retrieved from local lore database
     character_profile: Optional["CharacterProfile"] = None  # per-string persona
+    # Force-Retranslate (Ctrl+Alt+T): bypass the translation CACHE read (and
+    # evict the stale entry) so a fresh AI call actually happens, then let the
+    # normal end-of-request cache write overwrite it with the new result.
+    # Deliberately does NOT bypass Translation Memory -- TM holds curated/
+    # official reference translations, which force-retranslate has no reason
+    # to override; only the AI's own auto-cached output is what "force" means
+    # to ignore here. Without this, clearing a row's text and re-running it
+    # (the previous implementation of Force Retranslate) did nothing at all
+    # whenever a cache hit existed: the SAME stale value was served right
+    # back with zero fresh generation, making the feature a no-op.
+    force_retranslate: bool = False
 
     def to_prompt(self, text: Optional[str] = None) -> str:
         """Generate the user-turn prompt.
@@ -1297,6 +1308,12 @@ class OllamaWorker(QObject):
                 continue
 
             is_retry = bool(req.retry_hint) or bool(req.fix_translation)
+            # Force-Retranslate bypasses the CACHE read only (see
+            # TranslationRequest.force_retranslate) -- Translation Memory
+            # lookups just above/below stay gated on is_retry alone, since TM
+            # is curated reference material force-retranslate has no reason
+            # to override.
+            bypass_cache = is_retry or req.force_retranslate
 
             # Exact TM lookup (O(1) dict reads — no fuzzy here to keep pre-flight fast)
             if not is_retry and self.translation_memory:
@@ -1314,7 +1331,7 @@ class OllamaWorker(QObject):
                     continue
 
             # Cache lookup
-            if not is_retry and self.translation_cache:
+            if not bypass_cache and self.translation_cache:
                 cache_key = TranslationCache.make_key(
                     req.original_text, self.model, req.source_lang, req.target_lang,
                     settings_hash=self._settings_hash_for(req.original_text),
@@ -1343,6 +1360,15 @@ class OllamaWorker(QObject):
                         completed_count += 1
                         self.progress.emit(completed_count, total)
                         continue
+            elif req.force_retranslate and self.translation_cache:
+                # Evict any stale entry up front (mirrors _translate_single's
+                # is_retry eviction branch) so the fresh result that follows
+                # this pre-flight pass overwrites it cleanly.
+                cache_key = TranslationCache.make_key(
+                    req.original_text, self.model, req.source_lang, req.target_lang,
+                    settings_hash=self._settings_hash_for(req.original_text),
+                )
+                self.translation_cache.delete(cache_key)
 
             # Deduplication: retries always go through (they need fresh results)
             if not is_retry:
@@ -1802,6 +1828,11 @@ class OllamaWorker(QObject):
         # and will return empty or a refusal.  Return SKIP_SIGNAL so the string keeps
         # its current translation and mechanical fixes (newlines, whitespace) are used.
         is_retry = bool(req.retry_hint) or bool(req.fix_translation)
+        # Force-Retranslate (Ctrl+Alt+T) bypasses the CACHE read only — see
+        # TranslationRequest.force_retranslate. TM lookup below stays gated on
+        # is_retry alone: TM is curated reference material, not the AI's own
+        # auto-cached output, so force-retranslate has no reason to override it.
+        bypass_cache = is_retry or req.force_retranslate
         # In fix mode the source is always the original English — skip the
         # "already Ukrainian" guard that would short-circuit the request.
         if is_retry and not req.fix_translation and req.target_lang.lower() == "ukrainian":
@@ -1853,7 +1884,7 @@ class OllamaWorker(QObject):
                 req.original_text, self.model, req.source_lang, req.target_lang,
                 settings_hash=self._settings_hash_for(req.original_text),
             )
-            if not is_retry:
+            if not bypass_cache:
                 cached = self.translation_cache.get(cache_key)
                 if cached is not None:
                     cached = self._heal_known_artifacts(cached, req.original_text)
@@ -1882,9 +1913,15 @@ class OllamaWorker(QObject):
                         logger.debug(f"Cache hit for string {req.string_id}")
                         return cached
             else:
-                # Evict the stale (bad) entry so the fresh result replaces it.
+                # Evict the stale (bad, or simply superseded by a
+                # Force-Retranslate request) entry so the fresh result
+                # replaces it.
                 self.translation_cache.delete(cache_key)
-                logger.debug(f"Retranslation: evicted cache entry for string {req.string_id}")
+                logger.debug(
+                    "%s: evicted cache entry for string %s",
+                    "Retranslation" if is_retry else "Force-Retranslate",
+                    req.string_id,
+                )
         else:
             cache_key = None
 

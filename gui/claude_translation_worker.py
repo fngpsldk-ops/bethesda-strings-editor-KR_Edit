@@ -137,27 +137,38 @@ class ClaudeTranslationWorker(QObject):
     # ── Main translation slot ──────────────────────────────────────────────────
 
     def _compute_settings_hash(self) -> str:
-        """Short hash of glossary contents + prompt version (mirrors
-        OpenAICompatWorker._compute_settings_hash). Changing the glossary or
-        the prompt persona/rules changes this hash, so old cache entries are
-        bypassed and re-translated automatically."""
-        import hashlib as _hl
+        """Refresh the string-independent hash components and return the
+        BASE hash (prompt version + persona + rules — no glossary).
+
+        Mirrors OpenAICompatWorker: the glossary no longer enters this
+        global hash. Each string's cache key instead mixes in only the
+        glossary pairs matching that string (_settings_hash_for), so a term
+        edit invalidates only the strings containing it, not the whole cache."""
         try:
             from gui.ollama_worker import get_prompt_overrides
             _persona, _rules = get_prompt_overrides()
         except Exception:
             _persona, _rules = "", ""
-        PROMPT_VERSION = 5
-        parts = [f"pv{PROMPT_VERSION}", f"persona={_persona}", f"rules={_rules}"]
-        if self.glossary_manager is not None:
-            try:
-                entries = [e for _scope, e in self.glossary_manager.all_entries()]
-                for e in sorted(entries, key=lambda x: (x.source_term, x.target_term)):
-                    parts.append(f"{e.source_term}={e.target_term}")
-            except Exception:
-                pass
-        combined = "\n".join(parts)
-        return _hl.sha256(combined.encode("utf-8")).hexdigest()[:12]
+        from gui.settings_hash import base_settings_parts, settings_hash_for_text
+        self._base_parts = base_settings_parts(_persona, _rules)
+        return settings_hash_for_text(None, "", self._base_parts)
+
+    def _settings_hash_for(self, source_text: str) -> str:
+        """Per-string settings hash (base parts + glossary pairs matching
+        *source_text*). Shared contract with the other workers and
+        main_window's string-editor write-through. Base parts are rebuilt
+        from the live prompt overrides on every call so pre-batch or
+        post-Prompt-Editor calls never use a stale snapshot."""
+        try:
+            from gui.ollama_worker import get_prompt_overrides
+            _persona, _rules = get_prompt_overrides()
+        except Exception:
+            _persona, _rules = "", ""
+        from gui.settings_hash import base_settings_parts, settings_hash_for_text
+        return settings_hash_for_text(
+            self.glossary_manager, source_text,
+            base_settings_parts(_persona, _rules),
+        )
 
     @Slot(list)
     def translate_batch(self, requests: list) -> None:
@@ -213,6 +224,11 @@ class ClaudeTranslationWorker(QObject):
             # skipped for these requests, or the retry silently short-circuits
             # back to the same broken text with the API never called again.
             is_retry = bool(req.retry_hint) or bool(req.fix_translation)
+            # Force-Retranslate (Ctrl+Alt+T) bypasses the CACHE read only (see
+            # TranslationRequest.force_retranslate) -- TM lookup below stays
+            # gated on is_retry alone, since TM is curated reference material
+            # force-retranslate has no reason to override.
+            bypass_cache = is_retry or req.force_retranslate
 
             # Check translation cache. Uses TranslationCache.make_key() — the
             # same format OllamaWorker/OpenAICompatWorker use — instead of the
@@ -223,7 +239,7 @@ class ClaudeTranslationWorker(QObject):
             # never found by this worker's own lookup.
             cache_key = TranslationCache.make_key(
                 source_text, self.model, self.source_lang, self.target_lang,
-                self._settings_hash,
+                self._settings_hash_for(source_text),
             )
 
             # Check translation memory FIRST — exact ID hit (verified against
@@ -259,7 +275,7 @@ class ClaudeTranslationWorker(QObject):
             # translation cached via the standard key (e.g. from the string
             # editor, which writes through TranslationCache.make_key) was
             # never found by this worker's own lookup.
-            if not is_retry and self.translation_cache:
+            if not bypass_cache and self.translation_cache:
                 cached = self.translation_cache.get(cache_key)
                 if cached:
                     self.translation_ready.emit(req.index, cached, req.string_id, "cache")
@@ -267,6 +283,10 @@ class ClaudeTranslationWorker(QObject):
                     done += 1
                     self.progress.emit(done, total)
                     continue
+            elif req.force_retranslate and self.translation_cache:
+                # Evict the superseded entry up front so the fresh result
+                # (cached unconditionally once generated) overwrites it.
+                self.translation_cache.delete(cache_key)
 
             # Dedup (retries always go through fresh, matching OllamaWorker)
             owns_followers = False
