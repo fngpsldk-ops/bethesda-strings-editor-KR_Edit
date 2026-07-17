@@ -31,8 +31,23 @@ datas = [
     *[(str(p), 'gui/translations/') for p in __import__('pathlib').Path('gui/translations').glob('*.qm')],
     # Default protected-terms list shipped with the app
     ('protected_terms_starfield_hq.txt', '.'),
-    # Default glossary
-    ('starfield_glossary.json', '.'),
+    # Ship the working TM/cache/glossary as the DEFAULT starting state for a
+    # fresh install -- deliberately curated, not "everything under
+    # PortableData/": config.json (personal settings: theme, window geometry,
+    # recent files, backend choice) and pre_est_weights.json (a small
+    # calibration file derived from this-machine correction history) are
+    # intentionally left OUT so a fresh download never carries anyone's
+    # personal settings, only shared reference/working data (see README's
+    # TM/cache section and .gitignore's comment for the full reasoning).
+    # Without these three lines, PyInstaller's COLLECT step produces NO
+    # PortableData folder at all (nothing else in `datas` references it), so
+    # app_settings.py's portable-mode detection (a "PortableData" folder
+    # sitting next to the .exe) finds nothing and silently falls back to the
+    # OS-native per-user config dir instead -- confirmed: this is exactly
+    # why a built release previously shipped with an empty TM/cache/glossary.
+    ('PortableData/Config/glossary.json', 'PortableData/Config/'),
+    ('PortableData/Config/translation_cache.json', 'PortableData/Config/'),
+    ('PortableData/Config/translation_memory.json', 'PortableData/Config/'),
 ]
 
 a = Analysis(
