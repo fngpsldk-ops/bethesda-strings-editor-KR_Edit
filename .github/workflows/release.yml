@@ -43,9 +43,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            artifact: bethesda-strings-editor-linux-x64.zip
+            artifact: bethesda-strings-editor-KOR-linux-x64.zip
           - os: windows-latest
-            artifact: bethesda-strings-editor-windows-x64.zip
+            artifact: bethesda-strings-editor-KOR-windows-x64.zip
 
     steps:
       - uses: actions/checkout@v4
@@ -93,19 +93,19 @@ jobs:
       #     $bytes = [Convert]::FromBase64String($env:SIGNING_CERT)
       #     $pfxPath = "$env:TEMP\cert.pfx"
       #     [IO.File]::WriteAllBytes($pfxPath, $bytes)
-      #     $exe = "dist\bethesda-strings-editor\bethesda-strings-editor.exe"
+      #     $exe = "dist\bethesda-strings-editor-KOR\bethesda-strings-editor-KOR.exe"
       #     & signtool sign /fd sha256 /f $pfxPath /p $env:SIGNING_PASS `
       #         /tr http://timestamp.digicert.com /td sha256 $exe
       #     Remove-Item $pfxPath
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: cd dist && zip -r ../${{ matrix.artifact }} bethesda-strings-editor/
+        run: cd dist && zip -r ../${{ matrix.artifact }} bethesda-strings-editor-KOR/
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist\bethesda-strings-editor\* -DestinationPath ${{ matrix.artifact }}
+        run: Compress-Archive -Path dist\bethesda-strings-editor-KOR\* -DestinationPath ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -115,10 +115,16 @@ jobs:
           retention-days: 7
 
   # ── Release ───────────────────────────────────────────────────────────────────
-  # Requires one repository secret:
-  #   GPG_PRIVATE_KEY  — base64-encoded armored private key
-  #                      (gpg --armor --export-secret-keys KEYID | base64 -w0)
-  #   (key has no passphrase — no GPG_PASSPHRASE secret needed)
+  # GPG signing is OPTIONAL: only runs if the GPG_PRIVATE_KEY secret is set.
+  # Without it, the release still publishes fine -- SHA256SUMS.asc (the
+  # signature file) just won't exist, and action-gh-release below silently
+  # skips a `files:` glob entry with zero matches rather than failing. To
+  # enable signing later:
+  #   1. gpg --full-generate-key   (no passphrase, or the workflow below
+  #      would need a GPG_PASSPHRASE secret too)
+  #   2. gpg --armor --export-secret-keys KEYID | base64 -w0
+  #   3. Save that output as the GPG_PRIVATE_KEY repository secret
+  #      (Settings -> Secrets and variables -> Actions -> New repository secret)
   release:
     name: Create Release
     needs: [changelog, build]
@@ -142,6 +148,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Import GPG signing key
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -154,6 +161,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # SHA256SUMS.asc only exists if the GPG step above ran (secret
+          # configured). softprops/action-gh-release resolves `files:`
+          # entries as globs and simply uploads nothing for a pattern with
+          # zero matches -- it does not fail the release when this one line
+          # doesn't match anything.
           files: |
             *.zip
             SHA256SUMS
