@@ -468,3 +468,106 @@ def test_suggest_after_truncated_review_starts_clean():
         panel._input_would_be = "Please translate this game string:\n\nSource: Open the door."
     sent_before_new_turn = list(panel._history)
     assert sent_before_new_turn == []
+
+
+# ── Multiple-suggestion picker ──────────────────────────────────────────────
+# Real-world bug: when Claude's review/suggestion offered multiple options
+# (e.g. a primary translation plus "또는 더 간결하게:" alternative), Apply
+# silently always used whichever code block came LAST -- no way to tell
+# which one was actually wanted. Fixed: a single block still applies
+# directly (no extra friction for the common case); two or more show a
+# picker labeled with Claude's own preceding phrasing for each option.
+
+def test_extract_code_blocks_with_labels_matches_screenshot_structure():
+    text = (
+        "## 개선 제안\n\n"
+        "```\n바룬 기술 연구소 거주 모듈 (각 거주 모듈 변형의 이름에 표시된 문은 사용 가능하며, "
+        "그 외의 모든 면은 차단되어 있습니다.)\n```\n\n"
+        "또는 더 간결하게:\n\n"
+        "```\n바룬 기술 연구소 거주 모듈 (각 변형 이름에 표시된 문만 사용 가능하며, 나머지는 모두 차단됨.)\n```"
+    )
+    blocks = ClaudeChatPanel._extract_code_blocks_with_labels(text)
+    assert len(blocks) == 2
+    assert blocks[0][0] == "개선 제안"          # markdown ## stripped
+    assert blocks[1][0] == "또는 더 간결하게"    # Claude's own phrasing, trailing ':' stripped
+    assert blocks[0][1].startswith("바룬 기술 연구소")
+    assert blocks[1][1].startswith("바룬 기술 연구소")
+
+
+def test_extract_code_blocks_single_block_has_no_generic_fallback_needed():
+    blocks = ClaudeChatPanel._extract_code_blocks_with_labels("```\n문을 여십시오.\n```")
+    assert len(blocks) == 1
+    assert blocks[0][1] == "문을 여십시오."
+
+
+def test_extract_code_blocks_falls_back_to_generic_label_when_no_preceding_text():
+    text = "```\n첫번째\n```\n```\n두번째\n```"  # back-to-back, no text between
+    blocks = ClaudeChatPanel._extract_code_blocks_with_labels(text)
+    assert len(blocks) == 2
+    assert blocks[1][0] == "옵션 2"
+
+
+def test_apply_single_block_skips_picker_dialog():
+    panel = ClaudeChatPanel()
+    panel.set_current_string(1, "Open the door.", "", source_lang="en", target_lang="ko")
+    panel._begin_claude_stream()
+    panel._on_reply("```\n문을 여십시오.\n```")
+
+    applied = []
+    panel.apply_translation.connect(applied.append)
+    # If _do_apply tried to open a real modal dialog for a single block, this
+    # would hang in a headless run; not patching QDialog.exec at all and
+    # still getting a clean result proves the picker was skipped entirely.
+    panel._do_apply()
+    assert applied == ["문을 여십시오."]
+
+
+def test_apply_multiple_blocks_uses_the_chosen_one_not_always_the_last():
+    from unittest.mock import patch
+
+    panel = ClaudeChatPanel()
+    panel.set_current_string(1, "Open the door.", "", source_lang="en", target_lang="ko")
+    panel._begin_claude_stream()
+    panel._on_reply(
+        "## 개선 제안\n\n```\n기본안 번역입니다.\n```\n\n또는 더 간결하게:\n\n```\n간결한 번역.\n```"
+    )
+
+    applied = []
+    panel.apply_translation.connect(applied.append)
+
+    # Simulate the person picking the FIRST option (not the last block).
+    with patch.object(ClaudeChatPanel, "_pick_suggestion", lambda self, blocks: blocks[0][1]):
+        panel._do_apply()
+    assert applied == ["기본안 번역입니다."]
+
+
+def test_apply_multiple_blocks_cancel_applies_nothing():
+    from PySide6.QtWidgets import QDialog
+    from unittest.mock import patch
+
+    panel = ClaudeChatPanel()
+    panel.set_current_string(1, "Open the door.", "", source_lang="en", target_lang="ko")
+    panel._begin_claude_stream()
+    panel._on_reply(
+        "## 개선 제안\n\n```\n기본안 번역입니다.\n```\n\n또는 더 간결하게:\n\n```\n간결한 번역.\n```"
+    )
+
+    applied = []
+    panel.apply_translation.connect(applied.append)
+
+    with patch.object(QDialog, "exec", return_value=QDialog.Rejected):
+        panel._do_apply()
+    assert applied == []
+
+
+def test_pick_suggestion_dialog_accept_returns_selected_block():
+    from PySide6.QtWidgets import QDialog
+    from unittest.mock import patch
+
+    panel = ClaudeChatPanel()
+    blocks = [("기본안", "번역 A"), ("더 간결하게", "번역 B")]
+
+    with patch.object(QDialog, "exec", return_value=QDialog.Accepted):
+        result = panel._pick_suggestion(blocks)
+    # Default selection is row 0 unless the person clicks another row.
+    assert result == "번역 A"

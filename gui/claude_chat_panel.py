@@ -19,11 +19,15 @@ from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDockWidget,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -476,14 +480,90 @@ class ClaudeChatPanel(QDockWidget):
             msg += f"\n\nExisting translation (may need improvement): {self._current_translation}"
         self._send_message(msg)
 
+    @staticmethod
+    def _extract_code_blocks_with_labels(text: str) -> list:
+        """Return [(label, code), ...] for every ```code``` block in *text*.
+
+        *label* is the last non-empty line immediately preceding that block
+        (e.g. "또는 더 간결하게:" for a second, more-concise alternative) —
+        this is exactly the phrasing Claude itself uses to distinguish
+        multiple options it offers, so reusing it as the picker label needs
+        no extra prompt engineering. Falls back to "옵션 N" when there's no
+        usable preceding text (e.g. the block is the very first thing in the
+        reply, or two blocks appear back-to-back).
+        """
+        import re
+        pattern = re.compile(r"```\n?(.*?)\n?```", re.DOTALL)
+        blocks = []
+        last_end = 0
+        for i, m in enumerate(pattern.finditer(text), start=1):
+            preceding = text[last_end:m.start()]
+            label = ""
+            for line in reversed(preceding.strip("\n").splitlines()):
+                line = line.strip().strip(":").strip()
+                line = line.lstrip("#").strip()          # markdown headers (##, ###)
+                line = line.replace("**", "").strip()     # markdown bold markers
+                if line:
+                    label = line
+                    break
+            if not label:
+                label = f"옵션 {i}"
+            blocks.append((label, m.group(1).strip()))
+            last_end = m.end()
+        return blocks
+
+    def _pick_suggestion(self, blocks: list) -> Optional[str]:
+        """Show a picker when *blocks* has more than one (label, code) pair;
+        return the chosen code, or None if the person cancels. Returns the
+        single block directly, with no dialog, when there's only one —
+        the common case stays exactly as fast as before this fix."""
+        if len(blocks) == 1:
+            return blocks[0][1]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.tr("적용할 번역 선택"))
+        dlg.resize(520, 360)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(self.tr(
+            "Claude가 여러 안을 제시했습니다. 적용할 것을 선택하세요:"
+        )))
+
+        list_widget = QListWidget()
+        for label, code in blocks:
+            preview = code if len(code) <= 160 else code[:160] + "…"
+            item = QListWidgetItem(f"{label}\n{preview}")
+            list_widget.addItem(item)
+        list_widget.setCurrentRow(0)
+        list_widget.setWordWrap(True)
+        layout.addWidget(list_widget, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        list_widget.itemDoubleClicked.connect(lambda _item: dlg.accept())
+        layout.addWidget(buttons)
+
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        idx = list_widget.currentRow()
+        if idx < 0:
+            return None
+        return blocks[idx][1]
+
     @Slot()
     def _do_apply(self) -> None:
-        """Extract last code block from Claude's last raw reply and emit
+        """Extract code block(s) from Claude's last raw reply and emit
         apply_translation. Reads self._last_reply_raw (set by _on_reply /
         _on_review_done) rather than re-parsing the rendered chat_view —
         the HTML formatting step replaces ```…``` fences with <pre> tags,
-        so scraping toPlainText() afterward never finds them."""
-        import re
+        so scraping toPlainText() afterward never finds them.
+
+        When Claude's reply contains MULTIPLE code blocks (e.g. a primary
+        suggestion plus a "또는 더 간결하게:" alternative), this used to
+        silently apply whichever one happened to come last — no way to tell
+        which was actually wanted. Now: one block applies directly as
+        before; two or more show a picker so the choice is explicit.
+        """
         raw = self._last_reply_raw
         if not raw:
             QMessageBox.information(
@@ -495,12 +575,8 @@ class ClaudeChatPanel(QDockWidget):
                 ),
             )
             return
-        blocks = re.findall(r"```\n?(.*?)\n?```", raw, re.DOTALL)
-        if blocks:
-            suggestion = blocks[-1].strip()
-            self.apply_translation.emit(suggestion)
-            self._append_system(f"Applied: {suggestion[:80]}…" if len(suggestion) > 80 else f"Applied: {suggestion}")
-        else:
+        blocks = self._extract_code_blocks_with_labels(raw)
+        if not blocks:
             QMessageBox.information(
                 self,
                 self.tr("No suggestion found"),
@@ -509,6 +585,12 @@ class ClaudeChatPanel(QDockWidget):
                     "Ask Claude to suggest a translation first."
                 ),
             )
+            return
+        suggestion = self._pick_suggestion(blocks)
+        if suggestion is None:
+            return  # cancelled the picker
+        self.apply_translation.emit(suggestion)
+        self._append_system(f"Applied: {suggestion[:80]}…" if len(suggestion) > 80 else f"Applied: {suggestion}")
 
     @Slot()
     def _do_send(self) -> None:
