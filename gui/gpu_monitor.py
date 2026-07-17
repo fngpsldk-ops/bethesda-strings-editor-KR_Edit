@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 logger = logging.getLogger(__name__)
@@ -94,12 +94,24 @@ def _read_amd(dev: Path) -> Optional[GpuStats]:
 
 
 def _read_nvidia() -> Optional[GpuStats]:
+    # On a frozen/windowed build (no console of its own), spawning a console
+    # child like nvidia-smi without suppressing its window makes Windows
+    # allocate/tear down a console for it on every single call -- confirmed
+    # to be slow enough, polled every 2s on the CALLING thread (see _poll()
+    # below), to make the whole UI feel intermittently frozen. Same fix
+    # already applied to ollama_control.py's restart-command launch; mirrored
+    # here. stdin=DEVNULL for the same reason that fix uses it: a windowed
+    # process has no console to inherit stdin from, so leaving it unset can
+    # itself be a source of hangs on some systems.
+    creationflags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
     try:
         r = subprocess.run(
             ["nvidia-smi",
              "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=3,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
         )
         if r.returncode != 0:
             return None
@@ -163,6 +175,29 @@ def _fmt_mb(mb: int) -> str:
     return f"{mb / 1024:.1f}G" if mb >= 1024 else f"{mb}M"
 
 
+class _GpuPollThread(QThread):
+    """Runs read_gpu_stats() off the main/UI thread.
+
+    CREATE_NO_WINDOW (above) fixes the common case of nvidia-smi being slow
+    specifically because Windows has to allocate/tear down a console for it
+    on every call from a windowed (console-less) frozen build. But ANY
+    source of per-call latency here -- antivirus scanning the freshly
+    spawned process, driver query overhead, disk contention -- still blocks
+    whichever thread calls read_gpu_stats(). At a 2-second poll interval,
+    even occasional multi-hundred-ms stalls are a visible, recurring UI
+    freeze if run on the main thread (confirmed: this was the exact
+    "GPU polling makes the whole app intermittently unresponsive" bug from
+    the very first test of a frozen build). Running it here instead means
+    the worst nvidia-smi can do is make its OWN next poll late -- it can
+    never block a button click, a keystroke, or anything else.
+    """
+
+    stats_ready = Signal(object)  # GpuStats | None
+
+    def run(self) -> None:
+        self.stats_ready.emit(read_gpu_stats())
+
+
 class GpuMonitorWidget(QWidget):
     """Compact status-bar widget: GPU% · VRAM · Temp, updated every 2 s."""
 
@@ -179,7 +214,10 @@ class GpuMonitorWidget(QWidget):
         self._lbl.setStyleSheet("font-size: 11px;")
         lay.addWidget(self._lbl)
 
-        # Hide immediately if no GPU is detectable
+        # One-time synchronous probe at startup to decide whether a supported
+        # GPU exists at all (hide the widget entirely if not). This runs once,
+        # not on a 2s repeat, so it isn't the source of the recurring-freeze
+        # bug above -- left synchronous to keep first-paint logic simple.
         stats = read_gpu_stats()
         if stats is None:
             self.setVisible(False)
@@ -187,13 +225,24 @@ class GpuMonitorWidget(QWidget):
 
         self._apply(stats)
 
+        self._poll_thread: Optional[_GpuPollThread] = None
+
         self._timer = QTimer(self)
         self._timer.setInterval(self._POLL_MS)
         self._timer.timeout.connect(self._poll)
         self._timer.start()
 
     def _poll(self) -> None:
-        stats = read_gpu_stats()
+        # Skip this tick if the previous poll is still in flight (a slow
+        # nvidia-smi call delays its own next reading instead of stacking up
+        # background threads or blocking anything).
+        if self._poll_thread is not None and self._poll_thread.isRunning():
+            return
+        self._poll_thread = _GpuPollThread(self)
+        self._poll_thread.stats_ready.connect(self._on_stats_ready)
+        self._poll_thread.start()
+
+    def _on_stats_ready(self, stats: Optional[GpuStats]) -> None:
         if stats:
             self._apply(stats)
 
