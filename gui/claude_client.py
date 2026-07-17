@@ -267,12 +267,19 @@ class ClaudeClient:
         translation: str,
         source_lang: str = "ru",
         target_lang: str = "uk",
+        character_context: str = "",
     ) -> str:
         """
         Ask Claude to review a single translation and return structured feedback.
 
         Covers: accuracy, naturalness, game terminology, format-tag preservation,
-        and language-specific issues.  Returns a human-readable review string.
+        language-specific issues, and — when *character_context* is given — the
+        speaker's established voice/register (formality, tone, custom
+        instructions from the assigned Character Profile). Without this, the
+        review has no way to know WHO is speaking and can't judge whether the
+        translation matches that character's established diction (e.g. a
+        formal/reverent NPC's line rendered too casually, or vice versa).
+        Returns a human-readable review string.
         """
         from gui.ollama_worker import _LANG_DISPLAY  # type: ignore[attr-defined]
         src_name = _LANG_DISPLAY.get(source_lang, source_lang.upper())
@@ -285,13 +292,23 @@ class ClaudeClient:
             f"Bethesda game terminology, and format-tag preservation "
             f"(<Alias=…>, [Attack], [OPTIMIZED], %s, \\n, etc.)."
         )
+        if character_context:
+            system += (
+                f" This line is spoken by a character with an established voice — "
+                f"check specifically whether the translation matches it:\n{character_context}\n"
+                f"Call out any place the translation drifts from this voice (wrong "
+                f"formality/register, inconsistent tone) as its own issue, separate "
+                f"from accuracy/naturalness."
+            )
         user = (
             f"Original ({src_name}):\n{original}\n\n"
             f"Translation ({tgt_name}):\n{translation}\n\n"
             f"Review this translation. "
             f"List specific issues (if any), rate overall quality "
             f"(Poor / Fair / Good / Excellent), "
-            f"and if needed provide an improved version."
+            f"and if an improved version is needed, provide it wrapped in a code "
+            f"block on its own (```\\n<translation>\\n```) so it can be applied "
+            f"directly."
         )
 
         response = self._client.messages.create(

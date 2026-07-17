@@ -4824,7 +4824,27 @@ class MainWindow(QMainWindow):
             translation=row.get("translated", ""),
             source_lang=self.combo_source_lang.currentData(),
             target_lang=self.combo_target_lang.currentData(),
+            character_context=self._character_context_for_row(row.get("id", 0)),
         )
+
+    def _character_context_for_row(self, string_id: int) -> str:
+        """Describe the Character Profile assigned to *string_id*, if any, for
+        the Claude panel's review/suggest prompts. Mirrors the lookup
+        OllamaWorker already does for translation (profile_assignments ->
+        profile_manager), which the Claude panel previously had no access to
+        at all -- meaning Review/Suggest never knew who was speaking and
+        couldn't check whether the translation matched their established
+        voice (formality, tone, custom instructions)."""
+        if self._profile_assignments is None or self._profile_manager is None:
+            return ""
+        pid = self._profile_assignments.get(string_id)
+        if not pid:
+            return ""
+        profile = self._profile_manager.get(pid)
+        if not profile:
+            return ""
+        addendum = profile.system_addendum or profile.generate_addendum()
+        return f"Character: {profile.name} ({profile.formality} register)\n{addendum}"
 
     @Slot()
     def _claude_review_current(self) -> None:
@@ -4851,7 +4871,19 @@ class MainWindow(QMainWindow):
         if not rows or not text:
             return
         idx = rows[0].row()
+        original_text = self.table_model.get_row_data(idx).get("original", "")
         self.table_model.set_translated_text(idx, text)
+        # set_translated_text() alone never reaches the translation cache —
+        # the same gap already fixed for the string-edit popup, inline
+        # in-table edit, and Advanced Search/Replace's Replace All (see their
+        # comments). This was the fourth caller with the identical bug: a
+        # Claude-applied fix never stuck in the cache, so re-translating (or
+        # another row sharing the same source text) would silently regenerate
+        # the un-corrected wording. Emitting this is what
+        # main_window._on_string_corrected listens for to write the
+        # correction into the translation cache under the key the workers
+        # actually read.
+        self.table_model.string_manually_corrected.emit(idx, original_text)
         self.statusBar().showMessage(
             self.tr("Claude translation applied to row {row}.").format(row=idx + 1),
             5000,

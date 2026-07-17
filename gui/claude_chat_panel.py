@@ -86,6 +86,7 @@ class _ReviewWorker(QThread):
         translation: str,
         source_lang: str,
         target_lang: str,
+        character_context: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -95,13 +96,15 @@ class _ReviewWorker(QThread):
         self.translation = translation
         self.source_lang = source_lang
         self.target_lang = target_lang
+        self.character_context = character_context
 
     def run(self) -> None:
         try:
             from gui.claude_client import ClaudeClient
             client = ClaudeClient(self.api_key, self.model)
             review = client.review_translation(
-                self.original, self.translation, self.source_lang, self.target_lang
+                self.original, self.translation, self.source_lang, self.target_lang,
+                character_context=self.character_context,
             )
             self.review_ready.emit(review)
         except Exception as exc:
@@ -143,6 +146,16 @@ class ClaudeChatPanel(QDockWidget):
         self._current_translation: str = ""
         self._worker:   Optional[_ChatWorker]   = None
         self._reviewer: Optional[_ReviewWorker] = None
+        # Raw (pre-HTML-formatting) text of the most recent Claude reply —
+        # see _on_reply()/_on_review_done() for why _do_apply() must read
+        # from this instead of the rendered chat_view.
+        self._last_reply_raw: str = ""
+        # Character/speaker voice context for the currently selected string
+        # (name + formality + custom instructions), if a profile is assigned.
+        # Threaded into both the review and chat/suggest system prompts so
+        # Claude checks/preserves the established speaker tone instead of
+        # being blind to who's talking. Set by MainWindow via set_current_string().
+        self._character_context: str = ""
 
         self._build_ui()
 
@@ -305,12 +318,24 @@ class ClaudeChatPanel(QDockWidget):
         translation: str,
         source_lang: str = "ru",
         target_lang: str = "uk",
+        character_context: str = "",
     ) -> None:
         """Called by MainWindow when the user selects a table row."""
+        switched_string = getattr(self, "_current_string_id", None) != string_id
+        self._current_string_id   = string_id
         self._current_original    = original
         self._current_translation = translation
         self._source_lang         = source_lang
         self._target_lang         = target_lang
+        self._character_context   = character_context
+
+        if switched_string:
+            # A pending suggestion belongs to the PREVIOUS string. Leaving it
+            # applicable here risks silently writing one string's suggested
+            # text into a different, currently-selected row if Apply is
+            # clicked after switching rows without a new Review/Suggest.
+            self._last_reply_raw = ""
+            self._btn_apply.setEnabled(False)
 
         self._lbl_context_title.setText(
             self.tr("String 0x{sid:08X}").format(sid=string_id)
@@ -370,13 +395,20 @@ class ClaudeChatPanel(QDockWidget):
         from gui.ollama_worker import _LANG_DISPLAY  # type: ignore[attr-defined]
         src = _LANG_DISPLAY.get(self._source_lang, self._source_lang.upper())
         tgt = _LANG_DISPLAY.get(self._target_lang, self._target_lang.upper())
-        return (
+        prompt = (
             f"You are a Bethesda Starfield game localization assistant "
             f"helping with {src} → {tgt} translation. "
             f"You have access to the current string being worked on (shown in each user turn). "
             f"Be concise and practical. When suggesting a translation, wrap it in a code block: "
             f"```\n<translation here>\n```"
         )
+        if self._character_context:
+            prompt += (
+                f"\n\nThe current string is spoken by a character with an "
+                f"established voice — match it in any translation you suggest:\n"
+                f"{self._character_context}"
+            )
+        return prompt
 
     @Slot()
     def _do_review(self) -> None:
@@ -394,6 +426,7 @@ class ClaudeChatPanel(QDockWidget):
             translation=self._current_translation,
             source_lang=self._source_lang,
             target_lang=self._target_lang,
+            character_context=self._character_context,
             parent=self,
         )
         self._reviewer.review_ready.connect(self._on_review_done)
@@ -419,11 +452,24 @@ class ClaudeChatPanel(QDockWidget):
 
     @Slot()
     def _do_apply(self) -> None:
-        """Extract last code block from chat and emit apply_translation."""
-        html = self._chat_view.toPlainText()
-        # Find last ```…``` block
+        """Extract last code block from Claude's last raw reply and emit
+        apply_translation. Reads self._last_reply_raw (set by _on_reply /
+        _on_review_done) rather than re-parsing the rendered chat_view —
+        the HTML formatting step replaces ```…``` fences with <pre> tags,
+        so scraping toPlainText() afterward never finds them."""
         import re
-        blocks = re.findall(r"```\n?(.*?)\n?```", html, re.DOTALL)
+        raw = self._last_reply_raw
+        if not raw:
+            QMessageBox.information(
+                self,
+                self.tr("No suggestion found"),
+                self.tr(
+                    "No code block found in the last reply.\n"
+                    "Ask Claude to suggest a translation first."
+                ),
+            )
+            return
+        blocks = re.findall(r"```\n?(.*?)\n?```", raw, re.DOTALL)
         if blocks:
             suggestion = blocks[-1].strip()
             self.apply_translation.emit(suggestion)
@@ -452,6 +498,7 @@ class ClaudeChatPanel(QDockWidget):
     def _do_clear(self) -> None:
         self._history.clear()
         self._chat_view.clear()
+        self._last_reply_raw = ""
         self._btn_apply.setEnabled(False)
         self._append_system("Conversation cleared.")
 
@@ -516,6 +563,14 @@ class ClaudeChatPanel(QDockWidget):
         """Replace raw streamed text with nicely formatted HTML."""
         import re
         self._history.append({"role": "assistant", "content": text})
+        # Store the RAW (pre-HTML-formatting) reply so _do_apply() can pull a
+        # code block from it later. The rendered chat_view can't be re-parsed
+        # for this: the formatting step below replaces every ```…``` fence
+        # with a <pre> tag, and QTextEdit.toPlainText() on the resulting rich
+        # text never contains the backticks again — searching it for ``` (the
+        # previous implementation) matches nothing, always, for every message
+        # once it finishes streaming. Confirmed by direct reproduction.
+        self._last_reply_raw = text
 
         # Build the formatted content (same logic as _append_claude)
         formatted = re.sub(
@@ -540,8 +595,14 @@ class ClaudeChatPanel(QDockWidget):
 
     @Slot(str)
     def _on_review_done(self, text: str) -> None:
+        import re
         self._history.append({"role": "assistant", "content": text})
+        # Same reasoning as _on_reply: keep the raw text so a code-fenced
+        # improved translation in the review (see review_translation()'s
+        # updated prompt) can be applied too, not just Suggest responses.
+        self._last_reply_raw = text
         self._append_claude(text, prefix="📋 Translation Review")
+        self._btn_apply.setEnabled(bool(re.search(r"```", text)))
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:
