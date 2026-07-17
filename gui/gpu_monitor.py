@@ -103,7 +103,20 @@ def _read_nvidia() -> Optional[GpuStats]:
     # here. stdin=DEVNULL for the same reason that fix uses it: a windowed
     # process has no console to inherit stdin from, so leaving it unset can
     # itself be a source of hangs on some systems.
-    creationflags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+    #
+    # Belt-and-suspenders: creationflags=CREATE_NO_WINDOW alone has been
+    # reported to still flash a console in some Windows 11 configurations
+    # (notably when Windows Terminal is set as the default terminal app) --
+    # explicitly setting STARTUPINFO with STARTF_USESHOWWINDOW/SW_HIDE is the
+    # more universally-reliable second layer for this and costs nothing when
+    # the simpler flag alone would already have worked.
+    creationflags = 0
+    startupinfo = None
+    if sys.platform == "win32":
+        creationflags = 0x08000000  # CREATE_NO_WINDOW
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
     try:
         r = subprocess.run(
             ["nvidia-smi",
@@ -112,6 +125,7 @@ def _read_nvidia() -> Optional[GpuStats]:
             capture_output=True, text=True, timeout=3,
             stdin=subprocess.DEVNULL,
             creationflags=creationflags,
+            startupinfo=startupinfo,
         )
         if r.returncode != 0:
             return None

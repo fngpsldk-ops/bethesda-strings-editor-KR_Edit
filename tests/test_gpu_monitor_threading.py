@@ -48,12 +48,26 @@ def test_nvidia_smi_call_suppresses_console_on_windows():
             stdout = "10, 1000, 16000, 45\n"
         return R()
 
+    # subprocess.STARTUPINFO is a Windows-only attribute -- it doesn't exist
+    # on the Linux/macOS box this test suite normally runs on, so simulating
+    # "win32" behavior here needs a stand-in class as well, not just the
+    # platform-name patch.
+    class _FakeStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = None
+
     with patch.object(gm.subprocess, "run", fake_run), \
-         patch.object(gm.sys, "platform", "win32"):
+         patch.object(gm.sys, "platform", "win32"), \
+         patch.object(gm.subprocess, "STARTUPINFO", _FakeStartupInfo, create=True), \
+         patch.object(gm.subprocess, "STARTF_USESHOWWINDOW", 1, create=True):
         stats = gm._read_nvidia()
 
     assert captured["creationflags"] == 0x08000000  # CREATE_NO_WINDOW
     assert captured["stdin"] == gm.subprocess.DEVNULL
+    assert captured["startupinfo"] is not None
+    assert captured["startupinfo"].wShowWindow == 0  # SW_HIDE
+    assert captured["startupinfo"].dwFlags == 1  # STARTF_USESHOWWINDOW was OR'd in
     assert stats == gm.GpuStats(10, 1000, 16000, 45)
 
 
@@ -72,6 +86,7 @@ def test_nvidia_smi_call_uses_no_special_flags_off_windows():
         gm._read_nvidia()
 
     assert captured["creationflags"] == 0
+    assert captured["startupinfo"] is None
 
 
 def test_repeated_polling_runs_off_the_main_thread():
