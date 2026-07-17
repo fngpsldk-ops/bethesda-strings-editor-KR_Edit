@@ -1,264 +1,362 @@
 # BSEK — Bethesda Strings Editor: Korean Edition
 
 > **이 프로젝트는 [0xra0/bethesda-strings-editor](https://github.com/0xra0/bethesda-strings-editor)의 포크입니다.**
-> 원본은 다국어(9개 공식 언어 + 러시아어/우크라이나어/한국어) 지원 도구이며,
-> 이 포크(BSEK)는 **한국 이용자를 위해 영어 → 한국어 Starfield 모드 번역에 특화하여 개조**한
-> 버전입니다. 원본 도구 및 다른 언어 지원이 필요하시면 위 원본 저장소를 이용해주세요.
+> 원본은 다국어(9개 공식 언어 + 러시아어/우크라이나어) 지원 도구이며, 이 포크(BSEK)는
+> **한국 이용자를 위해 영어 → 한국어 Starfield 모드 번역에 특화**해 개조한 버전입니다.
+> 원본 도구나 다른 언어 지원이 필요하면 위 원본 저장소를 이용하세요.
 
 AI 기반 Starfield 모드 로컬라이제이션 도구. `.strings`, `.dlstrings`, `.ilstrings`,
 BA2 아카이브, ESP/ESM 플러그인 파일, Starfield 인터페이스 TXT 파일을 영어에서
-한국어로 번역합니다. Gemini/ChatGPT 같은 클라우드 AI 또는 로컬 Ollama 모델을 사용하며,
-번역 프롬프트를 GUI에서 직접 편집·저장할 수 있고, 전체 품질 검수 워크플로우를
-포함합니다.
+한국어로 번역합니다. 로컬 Ollama 모델 또는 클라우드 AI(Gemini/ChatGPT/Claude)를
+번역 백엔드로 사용하며, 번역 후 정확성·자연스러움·말투(존댓말/반말)까지 검토해주는
+Claude AI 어시스턴트, 자체 품질 검사, 번역 메모리(TM) 등을 갖춘 전체 로컬라이제이션
+워크플로우를 제공합니다.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![PySide6](https://img.shields.io/badge/UI-PySide6%20%2F%20Qt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://doc.qt.io/qtforpython)
 [![Ollama](https://img.shields.io/badge/AI-Ollama%20(local)-0D0D0D?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.com)
-[![Gemini](https://img.shields.io/badge/AI-Gemini%20%2F%20OpenAI%20compatible-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white)](https://aistudio.google.com/apikey)
 [![Claude](https://img.shields.io/badge/AI-Claude%20API-7C3AED?style=for-the-badge&logo=anthropic&logoColor=white)](https://claude.ai)
 [![License](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
 ---
 
-## BSEK에서 새로 추가/변경된 것 (원본 대비)
+## 목차
 
-원본 프로젝트의 핵심 번역·QA 엔진은 그대로 유지하면서, 다음을 새로 추가하거나 바꿨습니다:
-
-- **클라우드 AI 번역 백엔드 (GUI 내장)** — Gemini, ChatGPT 등 OpenAI 호환 API를
-  `Settings > Translation Backend`에서 직접 선택하고 API 키를 입력할 수 있습니다.
-  외부 프록시 서버를 따로 실행할 필요가 없습니다. 모델은 콤보박스에서 선택하거나
-  직접 입력할 수 있고(`gemini-3.5-flash` 등), API 키는 시스템 키링에 안전하게 저장됩니다.
-- **프롬프트 에디터** (`Translation > Prompt Editor…`) — 번역 프롬프트의 정체성
-  (페르소나)과 스타일 규칙을 GUI에서 직접 편집할 수 있습니다.
-  - 이름을 붙여 프리셋으로 저장/불러오기/이름변경/삭제
-  - 실시간 미리보기(모델에 실제로 전송될 전체 프롬프트 확인)
-  - 규칙 칸을 비워두면 BSEK 기본 규칙(게임 태그 보존, 대괄호 처리, 용어집 강제,
-    퀘스트 명령형 어투, 반말/존댓말 가이드)이 자동 적용됩니다
-  - 규칙 칸에 직접 입력하면 기본 규칙 전체를 대체합니다 — 다른 베데스다 게임
-    (Skyrim, Fallout 등)이나 다른 언어쌍용으로 프롬프트를 처음부터 새로 작성할 때
-    사용하세요. "베이스 규칙 복사" 버튼으로 기존 규칙을 불러와 이어서 편집할 수도
-    있습니다.
-- **한국어 중심 언어 구성** — 지원 언어를 English / Japanese / Korean 세 가지로
-  정리했습니다. 일본어는 번역 대상이 아니라 **참고용**으로 남겨뒀습니다 —
-  베데스다 공식 일본어 로컬라이제이션이 존댓말/반말 구분을 갖고 있어, 한국어와
-  가장 가까운 참고 자료가 될 수 있기 때문입니다. 기본 번역 방향은 English → Korean.
-- **메뉴 한글화** — 인터페이스 전체가 한국어로 번역되어 있습니다
-  (`gui/translations/ko_KR.ts`/`.qm`, 1,691개 UI 문자열).
-- **한국어 번역 품질 튜닝**:
-  - 팀 왈도(Team Wallo) 한글 패치 용어집(2,067개 UI 용어) 연동
-  - 퀘스트 목표/미션 로그는 서술형이 아닌 존댓말 명령형(~하십시오/~하세요)으로
-    번역하도록 규칙 추가
-  - 반말/존댓말은 화자의 맥락(거친 대사=반말 경향, 공적/상업적 대사=존댓말 경향)에
-    따라 판단하도록 가이드
-  - Translation Memory 조회 정확도 개선(짧은 단어 오매칭 방지) 및 속도 개선
-    (전체 스캔 → 역색인, 약 45배)
-- **Translation Memory 뷰어** — 상태바에서 TM 로드 상태를 항상 확인할 수 있고,
-  클릭하면 검색 가능한 브라우저가 열립니다.
-- **번역 출처 색상 표시** — 각 문자열이 TM/캐시/API 중 어디서 왔는지 행 배경색으로
-  구분되며, 번역 완료 메시지에 출처별 통계가 표시됩니다.
-- **동일 원문 일괄 적용** (`Ctrl+Alt+D`) — 반복되는 문자열을 AI가 매번 다르게
-  번역하는 문제를 우회해, 검수한 번역을 파일 내 동일 원문 전체에 복제합니다.
-- **강제 재번역** (`Ctrl+Alt+T`) — 이미 번역된 문자열도 강제로 다시 번역할 수
-  있습니다 (기본 번역은 이미 번역된 항목을 건너뜁니다).
-- **열 클릭 정렬** — 문자열 테이블의 모든 열에서 오름차순/내림차순 정렬 가능
-  (번역 진행 중에는 데이터 무결성을 위해 자동으로 잠깁니다).
-- **포터블 배포 지원** — 실행 파일 옆에 `PortableData` 폴더가 있으면 설정/캐시가
-  그 안에 저장되어, 폴더째로 다른 컴퓨터에 옮겨도 그대로 동작합니다.
-- **안정성 수정** — GPU 모니터 프리징, Windows Python 3.10 크래시, Settings
-  저장 시 앱이 조용히 종료되는 버그, 다크 테마에서 텍스트가 안 보이던 저대비
-  문제, 셀 선택 시 글자색이 안 보이던 문제, 저장 후에도 크래시 복구 팝업이
-  계속 뜨던 문제 등 다수 수정.
-- **업데이트 확인 대상 변경** — 원본은 업데이트 확인 및 "새 소식" 패널이 원본
-  저장소(`0xra0/bethesda-strings-editor`)를 가리키고 있었습니다. BSEK는 이
-  포크 저장소를 가리키도록 변경하여, 원본 프로젝트의 업데이트가 이 개조판을
-  덮어쓰는 일이 없도록 했습니다.
-- **실행 편의성** — 더블클릭으로 실행하는 Windows용 `run_bsek.bat` 런처 추가.
-- **정리** — 한국어와 무관한 우크라이나어 전용 문법 검사 메뉴(성 일치 검사)를
-  제거했습니다.
-
-원본에 있던 다른 언어(독일어, 스페인어, 프랑스어, 이탈리아어, 폴란드어,
-포르투갈어, 중국어 간체, 러시아어, 우크라이나어) 지원과 관련 기능(우크라이나어
-문법 검사, ти/ви 존비법 검사 등)이 필요하시면 [원본 저장소](https://github.com/0xra0/bethesda-strings-editor)를
-이용해주세요.
+1. [사전 준비물](#사전-준비물)
+2. [설치](#설치)
+3. [빠른 시작 (사용법)](#빠른-시작-사용법)
+4. [추천 Ollama 모델](#추천-ollama-모델)
+5. [추천 환경 세팅](#추천-환경-세팅)
+6. [Claude AI 어시스턴트](#claude-ai-어시스턴트)
+7. [클라우드 AI 배치 번역 (선택)](#클라우드-ai-배치-번역-선택)
+8. [지원 언어](#지원-언어)
+9. [원본 대비 주요 변경점](#원본-대비-주요-변경점)
+10. [원본에서 계속 지원하는 기능](#원본에서-계속-지원하는-기능)
+11. [문제 해결](#문제-해결)
+12. [소스에서 빌드/실행 (개발자용)](#소스에서-빌드실행-개발자용)
+13. [변경 이력 및 라이선스](#변경-이력-및-라이선스)
 
 ---
 
-## 번역 백엔드
+## 사전 준비물
 
-### 클라우드 AI (권장)
+BSEK 자체는 압축 풀고 실행 파일만 더블클릭하면 되는 포터블 프로그램입니다.
+번역을 실제로 돌리려면 아래 중 **최소 하나**의 번역 백엔드가 필요합니다.
 
-`Settings > Translation Backend > Cloud AI`에서 설정합니다.
+| 방법 | 필요한 것 | 비용 | 특징 |
+|---|---|---|---|
+| **로컬 Ollama** (권장) | [Ollama](https://ollama.com) 설치 + GPU(권장, VRAM 8GB+) | 무료 | 인터넷 불필요, 속도는 GPU 성능에 좌우 |
+| **클라우드 AI (Gemini/ChatGPT)** | API 키 | API 종량 과금 | 배치 번역 품질이 준수하고 빠름 |
+| **Claude API** (AI 어시스턴트용) | [Anthropic API 키](https://console.anthropic.com) | API 종량 과금 | 번역 검토/제안 전용, 배치 번역에도 쓸 수 있음 |
 
-| 항목 | 값 |
-|------|-----|
-| Base URL 예시 (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| Base URL 예시 (ChatGPT) | `https://api.openai.com/v1` |
-| 추천 모델 | `gemini-3.5-flash` |
-| API 키 발급 (Gemini) | https://aistudio.google.com/apikey |
+로컬 Ollama만 쓸 경우에도 GPU 없이 CPU로 돌아가긴 하지만 매우 느립니다.
+NVIDIA GPU + 최소 8GB VRAM을 권장하며, 아래 [추천 Ollama 모델](#추천-ollama-모델)의
+26B 모델을 쓰려면 16GB급을 권장합니다.
 
-OpenAI 호환 API를 제공하는 서비스라면 어디든 Base URL만 바꿔서 연결할 수 있습니다.
+---
 
-### 로컬 Ollama (대안)
+## 설치
 
-로컬 모델을 계속 사용할 수도 있습니다. `Settings > Translation Backend > Local LLM`에서 설정하세요.
+### 1. BSEK 다운로드
 
-| 모델 | 용도 | 비고 |
-|-------|---------|-----|
-| `exaone3.5:7.8b-instruct-q8_0` | 한국어 특화 (LG AI Research) | 로컬 사용 시 권장 |
-| `translategemma3-st` | 원본 프로젝트의 다국어 번역 모델 | 원본 GGUF 필요 |
-| `qcgemma4-st` | 번역 품질 검사 (16개 이슈 코드) | [0xra/bethesda-qc](https://ollama.com/0xra/bethesda-qc) |
+[Releases](../../releases) 페이지에서 최신 버전의 `bethesda-strings-editor-windows-x64.zip`을
+받아 원하는 폴더에 압축을 풉니다. 압축 해제 후 구조는 다음과 같습니다:
 
-```bash
-ollama pull exaone3.5:7.8b-instruct-q8_0
+```
+bethesda-strings-editor\
+├─ bethesda-strings-editor.exe   ← 이걸 더블클릭해서 실행
+├─ PortableData\                  ← 설정·캐시·용어집이 여기 저장됨 (폴더째 옮겨도 그대로 동작)
+└─ (기타 실행에 필요한 파일들)
 ```
 
-로컬 모델은 반말/존댓말 구분처럼 세계관 지식이 필요한 판단에서 클라우드 AI보다
-품질이 낮은 경향이 있습니다. 가능하면 클라우드 AI 사용을 권장합니다.
+Python이나 별도 런타임 설치가 필요 없습니다. `bethesda-strings-editor.exe`를
+더블클릭하면 바로 실행됩니다.
+
+> ⚠️ Windows Defender/백신이 처음 실행 시 경고를 띄울 수 있습니다 (서명되지 않은
+> 개인 배포 실행 파일이라 그렇습니다). "추가 정보 → 실행"으로 진행하세요.
+
+### 2. Ollama 설치 (로컬 번역을 쓸 경우)
+
+1. [ollama.com](https://ollama.com)에서 설치 프로그램을 받아 설치합니다.
+2. 설치 후 자동으로 백그라운드 서비스(트레이 아이콘)로 실행됩니다.
+3. PowerShell을 열고 원하는 모델을 받습니다 (아래 [추천 모델](#추천-ollama-모델) 참고):
+   ```powershell
+   ollama pull gemma4:26b-a4b-it-qat
+   ```
+4. 모델 저장 위치를 SSD/M.2로 바꾸고 싶다면 [문제 해결](#모델-저장-위치를-다른-드라이브로-옮기고-싶다면) 참고.
+
+### 3. (선택) Claude API 키 발급
+
+번역 검토/제안 기능(AI 어시스턴트 패널)을 쓰려면 [Anthropic Console](https://console.anthropic.com)에서
+API 키를 발급받아 BSEK 안에서 입력하면 됩니다 (아래 [Claude AI 어시스턴트](#claude-ai-어시스턴트) 참고).
+이 키는 시스템 키링(또는 암호화 파일)에 안전하게 저장됩니다.
+
+---
+
+## 빠른 시작 (사용법)
+
+1. **파일 열기** — `File > Open`으로 번역할 `.esp`/`.esm`/`.strings`/BA2 등을 엽니다.
+2. **번역 백엔드 선택** — `Settings`에서 Local LLM(Ollama) 또는 Cloud AI를 고르고,
+   모델을 선택합니다. (Ollama라면 미리 `ollama pull`로 받아둔 모델이 드롭다운에 보입니다.)
+3. **전체 번역** — `Translate All` (또는 선택한 행만 `Translate Selected`)로 배치 번역을 시작합니다.
+   진행 중 상태바에서 TM/캐시/API 출처별 통계를 실시간으로 확인할 수 있습니다.
+4. **품질 검사** — `Ctrl+F7`로 규칙 기반 품질 검사를 돌립니다. 문제 있는 행이 빨간색/노란색으로
+   표시됩니다.
+5. **애매한 문자열만 정밀 검토** — 문제로 표시됐거나 말투가 걱정되는 문자열을 선택하고
+   `Ctrl+Shift+C`로 Claude AI 어시스턴트 패널을 열어 "번역 검토"를 눌러봅니다.
+6. **저장** — `File > Save`로 원본 파일 형식 그대로 저장합니다.
+
+### 자주 쓰는 단축키
+
+| 단축키 | 기능 |
+|---|---|
+| `Ctrl+Alt+T` | 강제 재번역 (이미 번역돼 있어도 캐시 무시하고 새로 번역) |
+| `Ctrl+Alt+D` | 선택한 행의 번역을 파일 내 동일 원문 전체에 일괄 적용 |
+| `Ctrl+F7` | 품질 검사 실행 |
+| `Ctrl+Shift+C` | Claude AI 어시스턴트 패널 열기/닫기 |
+| `Ctrl+Alt+K` | 일관성 검사기 |
+| `Ctrl+K` | 커맨드 팔레트 |
+| `F11` | Zen/Focus 모드 |
+
+### 권장 작업 흐름
+
+```
+전체 번역 (Ollama, 빠르고 무료)
+   ↓
+품질 검사 Ctrl+F7 (규칙 기반, 무료·즉시)
+   ↓
+문제로 표시된 행 + 말투가 애매한 대사만
+   ↓
+Claude 어시스턴트로 개별 검토/제안 (정확하지만 API 비용 발생)
+```
+모든 문자열을 처음부터 Claude로 돌리면 품질은 더 안정적이지만 대량 파일에서는
+비용·시간이 꽤 늘어납니다. 대량은 로컬 모델로, 애매한 것만 Claude로 다듬는 게
+비용 대비 효율적입니다.
+
+---
+
+## 추천 Ollama 모델
+
+아래는 이 포크 관리자가 실제로 사용 중인 조합입니다 (RTX 4080, VRAM 16GB 기준).
+
+| 모델 | 용도 | 다운로드 용량 | 비고 |
+|---|---|---|---|
+| **`gemma4:26b-a4b-it-qat`** | 주력 번역 모델 | 약 15GB | MoE(26B 중 4B만 활성화)라 크기 대비 빠름. 번역 정확도가 가장 좋음 |
+| **`gemma4:12b-it-qat`** | 가벼운 대안 | 약 7GB | VRAM이 빠듯할 때, 또는 빠른 초벌 번역용 |
+
+```powershell
+ollama pull gemma4:26b-a4b-it-qat
+ollama pull gemma4:12b-it-qat
+```
+
+받은 모델은 BSEK 환경설정의 모델 드롭다운에서 자동으로 인식됩니다. 아직 안 받은
+모델명을 미리 등록해두고 싶다면 드롭다운 옆의 **Add** 버튼으로 이름만 저장해둘 수도
+있습니다 (나중에 `ollama pull`로 실제로 받으면 바로 작동).
+
+### VRAM 관련 주의사항
+
+`gemma4:26b-a4b-it-qat`는 가중치만 약 15GB라, **16GB급 GPU에서는 VRAM이 거의 꽉 찹니다.**
+BSEK 하단 상태바의 GPU 사용률(`GPU N% · 사용량/전체 · 온도`)로 항상 확인할 수 있습니다.
+90% 이상이면 여유가 거의 없다는 뜻이니:
+- 다른 GPU 사용 프로그램(브라우저 하드웨어 가속, 게임 등)과 동시 실행을 피하세요.
+- 버벅이거나 실패하면 환경설정에서 컨텍스트 제한을 낮추거나, `gemma4:12b-it-qat`로 바꿔보세요.
+- BSEK는 매 요청에 `keep_alive: -1`을 보내 모델을 VRAM에 계속 로드해둡니다(재로드
+  지연 방지 목적). 번역을 한동안 안 쓸 예정이면 `ollama stop <모델명>`으로 수동으로
+  내려서 VRAM을 다른 용도로 돌려줄 수 있습니다.
+
+### 모델 저장 위치를 다른 드라이브로 옮기고 싶다면
+
+기본적으로 `C:\Users\<사용자명>\.ollama\models`에 저장됩니다. 용량이 부담되거나
+M.2로 옮기고 싶다면:
+
+1. Ollama를 완전히 종료 (트레이 아이콘 우클릭 → Quit).
+2. 환경변수 `OLLAMA_MODELS`를 새 경로(예: `D:\OllamaModels`)로 설정.
+3. 기존 `.ollama\models` 폴더 내용물을 새 경로로 **이동**(복사 아님).
+4. Ollama 재시작 후 `ollama list`로 기존 모델들이 그대로 보이는지 확인.
+
+---
+
+## 추천 환경 세팅
+
+`Settings` 창에서 아래와 같이 맞추는 것을 권장합니다.
+
+| 항목 | 권장값 | 이유 |
+|---|---|---|
+| 자동 용어 보호 활성화 | ✅ 켜기 | 게임 태그(`<Alias=…>`, `[Attack]` 등)가 번역 중 깨지는 것 방지 |
+| 고유 명사 및 설정 용어 보호 | ✅ 켜기 | 세력/캐릭터/자원 이름 등이 임의로 번역되는 것 방지 |
+| 캐시 사용 | ✅ 켜기 | 동일 문자열 재번역 시 API 호출 절약 |
+| 컨텍스트 제한 | 모델 기본값 또는 16384 | 너무 낮으면 긴 대사가 잘릴 수 있음 |
+| 자동 후속 검토(self-review) | ✅ 켜기 (전체 번역 후) | 번역 직후 규칙 기반 품질 검사를 자동으로 한 번 더 돌려 명백한 오류를 스스로 재시도 |
+| AI 품질 검사 | 선택 | 켜면 현재 선택된 Ollama 모델로 의미론적 검사까지 추가 수행 (느려짐) |
+| 용어집 (Glossary) | 사용 | 팀 왈도 한글 패치 용어집이 기본 내장되어 있음 — 자체 용어 추가도 가능 |
+| 캐릭터 프로필 | 주요 NPC에 설정 | 화자별 말투(존댓말/반말, 성격)를 지정해두면 번역·검토 모두에 반영됨 |
+
+### 대량 파일을 처음 번역할 때
+
+1. 위 설정을 먼저 확인.
+2. `Translate All`로 전체 배치 실행 (Ollama 기준 수백~수천 줄도 수 분 내).
+3. 배치 완료 메시지에서 실패(failed) 건수 확인 — 실패한 문자열은 태그만 남거나
+   내용이 통째로 빠진 경우가 대부분이며, 다시 `Translate All`을 돌리면 재시도됩니다.
+4. `Ctrl+F7`로 전체 품질 검사.
+5. 문제로 표시된 행 위주로 `Ctrl+Alt+T`(강제 재번역) 또는 Claude 어시스턴트로 개별 대응.
+
+---
+
+## Claude AI 어시스턴트
+
+`Ctrl+Shift+C`로 여는 도킹 패널입니다. Anthropic API 키가 필요합니다(위 [사전 준비물](#사전-준비물) 참고).
+
+- **번역 검토** — 선택한 행 하나의 원문·번역문을 Claude에게 보내 정확성, 자연스러움,
+  게임 태그 보존, 그리고 **말투(존댓말/반말)가 맥락에 맞는지**까지 검토받습니다.
+  캐릭터 프로필이 지정된 문자열이면 그 인물의 확립된 말투를 우선 기준으로 삼습니다.
+- **번역 제안** — Claude에게 처음부터 번역을 새로 받아봅니다.
+- **번역으로 사용** — 검토/제안 결과에 포함된 개선안을 표에 바로 적용합니다. 여러
+  안이 제시된 경우 선택 창이 뜨니 원하는 것을 고르면 됩니다.
+
+응답은 항상 한국어로 나오며, 패널 크기에 맞춰 자동 줄바꿈됩니다.
+
+> 팁: 대량 배치 번역 자체를 Claude로 돌릴 수도 있지만(`Settings > Translation Backend > Cloud AI`
+> 계열 백엔드 중 하나로 Claude 선택), 비용 때문에 보통은 **로컬 Ollama로 배치, Claude는
+> 애매한 문자열 개별 검토용**으로 나눠 쓰는 걸 권장합니다.
+
+---
+
+## 클라우드 AI 배치 번역 (선택)
+
+`Settings > Translation Backend > Cloud AI`에서 설정합니다. OpenAI 호환 API를
+제공하는 서비스라면 Base URL만 바꿔서 아무거나 연결할 수 있습니다.
+
+| 항목 | 값 |
+|---|---|
+| Base URL 예시 (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| Base URL 예시 (ChatGPT) | `https://api.openai.com/v1` |
+| API 키 발급 (Gemini) | https://aistudio.google.com/apikey |
 
 ---
 
 ## 지원 언어
 
 | Code | Language | 비고 |
-|------|----------|-----|
+|---|---|---|
 | `en` | English | 번역 원문 (기본 소스) |
 | `ko` | Korean | 번역 대상 (기본 타겟) |
-| `ja` | Japanese | 참고용 (반말/존댓말 대조) |
+| `ja` | Japanese | 참고용 — 베데스다 공식 일본어 로컬라이제이션의 존댓말/반말 구분이 한국어와 가장 가까운 참고 자료가 될 수 있어 남겨둠 (번역 대상 아님) |
 
 ---
 
-## 설치 및 실행
+## 원본 대비 주요 변경점
+
+- **클라우드 AI 백엔드 내장** — Gemini/ChatGPT 등 OpenAI 호환 API를 GUI에서 바로 설정, 키는 시스템 키링에 저장.
+- **Claude AI 어시스턴트 패널** — 개별 문자열 검토/제안/적용, 말투 일관성 확인, 한국어 응답.
+- **프롬프트 에디터** (`Translation > Prompt Editor…`) — 페르소나/규칙을 GUI에서 직접 편집, 프리셋 관리, 실시간 미리보기.
+- **한국어 중심 언어 구성 + 전체 메뉴 한글화** (`gui/translations/ko_KR.ts`/`.qm`).
+- **번역 품질 튜닝** — 팀 왈도 한글 패치 용어집 연동, 퀘스트 로그 존댓말 명령형 규칙, 화자 맥락 기반 반말/존댓말 판단, TM 조회 속도·정확도 개선.
+- **모델 관리 개선** — Ollama 모델을 설정에서 바로 추가/저장, AI 품질 검사가 별도 모델 대신 현재 번역 모델을 그대로 사용.
+- **캐시/재번역 정확도 개선** — 용어집 수정 시 관련 문자열만 선택적으로 캐시 무효화, 강제 재번역이 실제로 캐시를 무시하고 새로 번역, 태그만 남고 내용이 사라지는 실패를 자동 감지·재시도.
+- **번역 메모리 뷰어**, **동일 원문 일괄 적용** (`Ctrl+Alt+D`), **강제 재번역** (`Ctrl+Alt+T`), **열 클릭 정렬**, **포터블 배포**.
+- **정리** — 한국어와 무관한 우크라이나어 전용 기능 제거, 업데이트 확인 대상을 이 포크 저장소로 변경.
+
+상세 변경 이력은 [CHANGES.md](CHANGES.md)를 참고하세요.
+
+---
+
+## 원본에서 계속 지원하는 기능
+
+- **파일 지원**: `.strings`/`.dlstrings`/`.ilstrings`, BA2 아카이브, ESP/ESM 플러그인,
+  VMAD(Papyrus) 스크립트 속성, Starfield 인터페이스 TXT, xTranslator SST XML,
+  NexusMods 번역 브라우저.
+- **품질 검사**: 20개 이상 자동 검사(태그 누락/추가, 미번역, 원문 언어 잔존, 줄바꿈
+  불일치 등), Hunspell 맞춤법 검사, 폰트/글리프 검사기, 자동 수정, 일관성 검사기.
+- **리뷰 도구**: 실제 게임 폰트 미리보기, 대화 트리 시각화, 오디오/TTS 미리듣기,
+  버전 비교, Diff 뷰어, 고급 검색/바꾸기.
+- **UI/워크플로우**: Zen 모드, 멀티모니터, 커맨드 팔레트, 번역 세션, 매크로 녹화,
+  16개 테마, 크래시 복구.
+
+전체 상세 기능 목록은 원본 저장소의 README를 참고하세요.
+
+---
+
+## 문제 해결
+
+**Q. 실행이 안 되거나 Windows Defender가 막아요.**
+서명되지 않은 개인 배포 실행 파일이라 그렇습니다. "추가 정보 → 실행"으로 진행하세요.
+
+**Q. Ollama 모델이 드롭다운에 안 보여요.**
+`ollama list`로 실제로 받아졌는지 먼저 확인하세요. 방금 받았다면 환경설정의
+"새로 고침" 버튼을 눌러보세요.
+
+**Q. 번역이 갑자기 다 실패해요 / "Empty response" 에러가 계속 떠요.**
+VRAM 부족일 가능성이 높습니다. 상태바 GPU 사용량을 확인하고, 다른 GPU 프로그램을
+끄거나 더 가벼운 모델(`gemma4:12b-it-qat`)로 바꿔보세요.
+
+**Q. 강제 재번역을 해도 번역이 그대로예요.**
+이미 최신 버전(캐시를 실제로 무시하고 재번역하도록 수정됨)인지 확인하세요. 그래도
+같은 결과가 나온다면 모델 자체가 그 문자열에 대해 일관되게 같은 답을 내는 것일
+수 있습니다 — Claude 어시스턴트로 개별 검토를 권장합니다.
+
+**Q. 설정을 바꿨는데 다음 실행 시 안 남아있어요.**
+`PortableData` 폴더가 실행 파일과 같은 위치에 있는지 확인하세요. 이 폴더가 없으면
+설정이 사용자 프로필 폴더에 저장되니, 폴더째로 옮길 계획이면 항상 함께 있어야 합니다.
+
+---
+
+## 소스에서 빌드/실행 (개발자용)
+
+일반 사용자는 이 섹션이 필요 없습니다 — 위 [설치](#설치)의 패키지 배포판을 쓰세요.
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-Windows에서는 `run_bsek.bat`을 더블클릭하면 됩니다 (BSE 폴더 안에 위치해야 함).
-
 핵심 의존성: `PySide6>=6.6`, `requests>=2.31`, `cryptography>=43.0`
+선택 의존성: `keyring`(키링 저장), `anthropic`(Claude 백엔드), `curl-cffi`(NexusMods
+무료 계정 다운로드), `py7zr`(`.7z` 해제).
 
-선택 의존성:
-- `keyring>=25.0` — API 키를 시스템 키링에 저장 (없으면 암호화 파일로 폴백)
-- `anthropic>=0.25` — Claude API 백엔드 사용 시
-- `curl-cffi>=0.7` — NexusMods 무료 계정 다운로드
-- `py7zr>=0.20` — `.7z` 아카이브 압축 해제
-
-로그는 stdout과 프로젝트 루트의 `translator.log`에 기록됩니다.
-
----
-
-## 프롬프트 에디터 사용법
-
-`Translation > Prompt Editor…` (또는 메뉴에서 "프롬프트 편집기") 로 엽니다.
-
-- **Persona (정체성/역할)** — 번역가의 정체성 문장. 비워두면 기본값 사용.
-- **Additional Rules (추가 규칙)** — 스타일 규칙. 비워두면 BSEK 기본 규칙
-  (게임 태그 보존 포함) 자동 적용. 내용을 입력하면 기본 규칙 전체를 대체합니다.
-- **Preset** — Save / Save As / Rename / Delete로 여러 프롬프트 세트를 관리.
-- **Preview Full Prompt** — 실제로 모델에 전송될 프롬프트 전체를 확인.
-- **베이스 규칙 복사** — BSEK 기본 규칙 전체를 Additional Rules 칸으로 불러와서
-  이어서 편집할 수 있습니다.
-
-⚠️ Additional Rules에 내용을 입력하면 게임 태그 보존(`%s`, `[[STRUCT_BREAK...]]` 등)
-규칙도 함께 사라집니다. 다른 게임/언어쌍용으로 완전히 새로 작성하는 게 아니라면
-"베이스 규칙 복사"로 먼저 불러온 뒤 수정하는 것을 권장합니다.
-
----
-
-## 원본 기능 (계속 지원)
-
-아래는 원본 프로젝트에서 물려받아 계속 사용 가능한 기능들입니다.
-
-### 파일 지원
-- 바이너리 문자열 파일: `.strings`, `.dlstrings`, `.ilstrings`
-- BA2 아카이브 (Starfield v2, GNRL 타입)
-- ESP/ESM 플러그인 (비-로컬라이즈드 플러그인)
-- ESP/ESM 모드 업데이트 마이그레이션 — 구버전/신버전 플러그인 diff 후 기존 번역 이전
-- VMAD 스크립트 속성 분석 (Papyrus)
-- Starfield 인터페이스 TXT (`translate_en.txt`)
-- xTranslator SST XML 가져오기/내보내기
-- NexusMods 번역 브라우저 — 기존 번역 모드 검색/다운로드/병합
-
-### 품질 검사
-- 20개 이상 자동 검사 (누락/추가 태그, 미번역, 원문 언어 잔존, 줄바꿈 불일치 등)
-- Hunspell 맞춤법 검사
-- AI 품질 검사 모델 (`qcgemma4-st`)
-- 폰트/글리프 검사기 — 번역 글자가 게임 내 폰트에서 네모(□)로 깨지는지 검사
-- 자동 수정 (Auto-Fix All)
-- 일관성 검사기 (Ctrl+Alt+K)
-
-### 리뷰 도구
-- Visual Context Preview (Ctrl+Shift+P) — 실제 게임 폰트로 미리보기
-- Dialogue Tree Visualizer — 퀘스트 대화 트리 시각화
-- Audio/TTS Preview (Ctrl+Shift+A) — 음성 합성 미리듣기, 원본 Wwise 음성 재생
-- 버전 비교, Diff 뷰어, 고급 검색
-
-### UI / 워크플로우
-- Zen/Focus 모드 (F11)
-- 멀티모니터 / 분리 패널
-- Command palette (Ctrl+K), vim 스타일 내비게이션
-- 번역 세션, 매크로 녹화
-- 16개 내장 테마
-- 크래시 복구, 보안 감사 로그
-
-전체 상세 기능 목록은 원본 저장소의 README를 참고하세요.
-
----
-
-## 프로젝트 구조
-
+UI 번역 파일을 수정했다면:
+```bash
+./scripts/compile_translations.sh
 ```
-bethesda_strings/              순수 파이썬 파싱 라이브러리 (Qt 비의존)
-  core.py                      .strings/.dlstrings/.ilstrings 바이너리 파서
-  ba2_handler.py                BA2 아카이브 리더/라이터
-  esp_handler.py                ESP/ESM 플러그인 파서
-  txt_handler.py                Starfield 인터페이스 TXT 파서
-  ...
+> `.ts` 파일을 다시 생성(`lupdate`)할 때는 **반드시 `gui/*.py` 전체**를 대상으로
+> 실행하세요. 파일 하나만 대상으로 돌리면 나머지 파일의 기존 번역이 전부
+> obsolete로 표시되어 컴파일 시 통째로 빠져버립니다.
 
-gui/                           PySide6 애플리케이션 레이어
-  main_window.py                최상위 윈도우, 파일 I/O, 번역 오케스트레이션
-  ollama_worker.py               로컬 Ollama 번역 워커 + 프롬프트 빌더
-                                 (DEFAULT_PERSONA, DEFAULT_CUSTOM_RULES,
-                                 default_rules_block(), set_prompt_overrides())
-  openai_compat_worker.py        BSEK 신규 — OpenAI 호환(Gemini/ChatGPT) 번역 워커
-  openai_compat_client.py        BSEK 신규 — 클라우드 API 키 SecretStore 저장
-  prompt_editor_dialog.py        BSEK 신규 — 프롬프트 에디터 GUI
-  prompt_presets.py              BSEK 신규 — 프롬프트 프리셋 CRUD 로직
-  claude_translation_worker.py   Claude API 번역 워커
-  quality_checker.py             번역 후 QA 검사 (20개 이상 코드)
-  term_protector.py              고유명사 보호 (플레이스홀더 치환)
-  translation_cache.py           SHA-256 키 기반 번역 캐시
-  glossary.py                    용어집 데이터 모델
-  theme_manager.py               16개 내장 테마 + get_hint_color() 헬퍼
-  updater.py                     GitHub 릴리스 업데이트 확인 (이 포크 저장소 대상)
-  app_settings.py                설정 저장/로드 (JSON + QSettings)
-  ...
-
-gui/translations/
-  ko_KR.ts / ko_KR.qm            한국어 UI 번역 (1,589개 문자열)
-
-run_bsek.bat                    Windows 더블클릭 실행기
-CHANGES.md                      이 포크에서의 상세 변경 이력
+패키징(PyInstaller):
+```bash
+pyinstaller bethesda_strings_editor.spec
 ```
+`v*` 태그를 푸시하면 GitHub Actions가 Windows/Linux 빌드를 자동으로 만들어 릴리스에 올립니다.
 
----
-
-## 변경 이력
-
-상세 변경 이력은 [CHANGES.md](CHANGES.md)를 참고하세요.
-
----
-
-## 테스트
-
+테스트:
 ```bash
 python -m pytest tests/
 ```
 
+프로젝트 구조 개요:
+
+```
+bethesda_strings/        순수 파이썬 파싱 라이브러리 (Qt 비의존)
+gui/                      PySide6 애플리케이션 레이어
+  main_window.py            최상위 윈도우, 파일 I/O, 번역 오케스트레이션
+  ollama_worker.py           로컬 Ollama 번역 워커 + 프롬프트 빌더
+  openai_compat_worker.py    클라우드(OpenAI 호환) 번역 워커
+  claude_translation_worker.py  Claude API 배치 번역 워커
+  claude_chat_panel.py       Claude AI 어시스턴트 패널
+  prompt_editor_dialog.py    프롬프트 에디터 GUI
+  quality_checker.py         규칙 기반 품질 검사
+  translation_memory.py      번역 메모리
+  translation_cache.py       번역 캐시
+  glossary.py                용어집
+  app_settings.py            설정 저장/로드
+gui/translations/         UI 다국어 번역 (.ts/.qm)
+tests/                    pytest 테스트 스위트
+```
+
 ---
 
-## 라이선스
+## 변경 이력 및 라이선스
+
+상세 변경 이력: [CHANGES.md](CHANGES.md)
 
 MIT — [LICENSE](LICENSE) 참고. 원본 프로젝트인
 [0xra0/bethesda-strings-editor](https://github.com/0xra0/bethesda-strings-editor) 역시 MIT 라이선스입니다.
