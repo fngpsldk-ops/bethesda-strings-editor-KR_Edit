@@ -35,6 +35,22 @@ from PySide6.QtWidgets import (
 
 logger = logging.getLogger(__name__)
 
+# HTML replacement for ```…``` code-fenced blocks in Claude's replies (used by
+# both _on_reply() and _append_claude()). `white-space: pre-wrap` keeps <pre>'s
+# whitespace/line-break preservation while ALSO wrapping long lines to the
+# widget's width — plain <pre> defaults to `white-space: pre`, which never
+# wraps, so a long suggested translation just ran off the right edge and
+# required horizontal scrolling instead of wrapping like the rest of the
+# panel (confirmed: this is exactly what the code-block content did, while
+# plain chat text elsewhere in the same QTextEdit wrapped normally).
+# `overflow-wrap: break-word` additionally breaks a single unbroken run (e.g.
+# a long ID/URL with no spaces) that's still wider than the widget.
+_CODE_BLOCK_HTML = (
+    r'<pre style="background:rgba(30,41,59,0.8);border-radius:4px;padding:6px;'
+    r'margin:4px 0;color:#a7f3d0;white-space:pre-wrap;overflow-wrap:break-word;">'
+    r'\1</pre>'
+)
+
 
 # ── Background chat worker ────────────────────────────────────────────────────
 
@@ -398,14 +414,24 @@ class ClaudeChatPanel(QDockWidget):
         prompt = (
             f"You are a Bethesda Starfield game localization assistant "
             f"helping with {src} → {tgt} translation. "
+            f"Write your own commentary/explanations in Korean (한국어) — that's "
+            f"the language the person you're helping works in. The suggested "
+            f"translation itself, inside the code block, stays in {tgt} as normal. "
             f"You have access to the current string being worked on (shown in each user turn). "
             f"Be concise and practical. When suggesting a translation, wrap it in a code block: "
-            f"```\n<translation here>\n```"
+            f"```\n<translation here>\n```\n"
+            f"When choosing register/formality (반말 vs 존댓말 for a Korean target, "
+            f"tu/vous, du/Sie, etc. otherwise): infer it from who's speaking to whom "
+            f"and in what relationship/tone in the SOURCE text, don't just copy "
+            f"whatever register an existing translation happens to already use — "
+            f"it may just be an unexamined default rather than a deliberate fit."
         )
         if self._character_context:
             prompt += (
                 f"\n\nThe current string is spoken by a character with an "
-                f"established voice — match it in any translation you suggest:\n"
+                f"established voice — this takes priority over inferring register "
+                f"from the source text above, since it's explicit and authoritative. "
+                f"Match it in any translation you suggest:\n"
                 f"{self._character_context}"
             )
         return prompt
@@ -575,8 +601,7 @@ class ClaudeChatPanel(QDockWidget):
         # Build the formatted content (same logic as _append_claude)
         formatted = re.sub(
             r"```\n?(.*?)\n?```",
-            r'<pre style="background:rgba(30,41,59,0.8);border-radius:4px;padding:6px;'
-            r'margin:4px 0;color:#a7f3d0;">\1</pre>',
+            _CODE_BLOCK_HTML,
             self._esc(text),
             flags=re.DOTALL,
         )
@@ -622,8 +647,7 @@ class ClaudeChatPanel(QDockWidget):
         # Highlight code blocks
         formatted = re.sub(
             r"```\n?(.*?)\n?```",
-            r'<pre style="background:rgba(30,41,59,0.8);border-radius:4px;padding:6px;'
-            r'margin:4px 0;color:#a7f3d0;">\1</pre>',
+            _CODE_BLOCK_HTML,
             self._esc(text),
             flags=re.DOTALL,
         )

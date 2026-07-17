@@ -273,12 +273,24 @@ class ClaudeClient:
         Ask Claude to review a single translation and return structured feedback.
 
         Covers: accuracy, naturalness, game terminology, format-tag preservation,
-        language-specific issues, and — when *character_context* is given — the
-        speaker's established voice/register (formality, tone, custom
-        instructions from the assigned Character Profile). Without this, the
-        review has no way to know WHO is speaking and can't judge whether the
-        translation matches that character's established diction (e.g. a
-        formal/reverent NPC's line rendered too casually, or vice versa).
+        register/formality appropriateness, and — when *character_context* is
+        given — the speaker's established voice (from the assigned Character
+        Profile). Register is checked even WITHOUT a character profile: the
+        reviewer reasons from the source text's own relationship/tone cues
+        (who's speaking to whom, how) to judge whether the translation's
+        formal/informal register actually fits, rather than silently
+        inheriting whatever the base translator picked. This matters because
+        the base Ollama translation prompt has a documented "default to
+        formal when genuinely unsure" fallback (see ollama_worker.py's
+        default_rules_block, rule 11) — a formal-register translation can
+        therefore be either a deliberate contextual judgment or just that
+        fallback firing, and the review previously never distinguished
+        between the two or flagged the latter for a second look.
+
+        The review itself is written in Korean (the interface language for
+        this build) — previously it defaulted to English with no language
+        directive at all.
+
         Returns a human-readable review string.
         """
         from gui.ollama_worker import _LANG_DISPLAY  # type: ignore[attr-defined]
@@ -288,9 +300,20 @@ class ClaudeClient:
         system = (
             f"You are an expert Bethesda Starfield game localization reviewer "
             f"specializing in {src_name} → {tgt_name} translation. "
+            f"Write your entire review in Korean (한국어), regardless of the "
+            f"source/target languages being reviewed — that's the language the "
+            f"person reading this review works in. "
             f"Be concise and actionable. Focus on accuracy, natural game dialogue style, "
-            f"Bethesda game terminology, and format-tag preservation "
-            f"(<Alias=…>, [Attack], [OPTIMIZED], %s, \\n, etc.)."
+            f"Bethesda game terminology, format-tag preservation "
+            f"(<Alias=…>, [Attack], [OPTIMIZED], %s, \\n, etc.), and register/formality "
+            f"appropriateness (반말 vs 존댓말 when the target is Korean, tu/vous, "
+            f"du/Sie, etc. for other targets). For register specifically: infer from "
+            f"the source text who is speaking to whom and in what relationship/tone "
+            f"(hostile, casual, professional, servile, commanding...), then judge "
+            f"whether the translation's formality actually matches that — don't just "
+            f"assume the existing translation's register is correct. Call this out as "
+            f"its own issue when it looks mismatched or looks like an unexamined "
+            f"default rather than a deliberate fit for the context."
         )
         if character_context:
             system += (

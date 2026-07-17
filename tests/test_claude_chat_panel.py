@@ -263,3 +263,125 @@ def test_apply_claude_translation_writes_through_to_cache():
         worker._settings_hash_for("Open the door."),
     )
     assert cache.get(key) == "제대로 된 번역."
+
+
+# ── UI: word-wrap for code-block content ────────────────────────────────────
+# Confirmed real-world bug: the AI Assistant panel is resizable, but a long
+# suggested/reviewed translation shown inside a ```code block``` never
+# wrapped to the panel's width -- it overflowed horizontally requiring a
+# scrollbar, regardless of how wide the panel was resized. Root cause: the
+# <pre> tag used to render code blocks had no `white-space` CSS property, and
+# Qt's rich-text engine (unlike a browser) does NOT word-wrap <pre> content by
+# default -- confirmed by direct document-layout measurement at multiple
+# widths (document width stayed fixed at ~1658px regardless of a 320/500/780px
+# container). Fixed by adding `white-space: pre-wrap; overflow-wrap: break-word`.
+
+def test_code_block_style_has_wrap_properties():
+    from gui.claude_chat_panel import _CODE_BLOCK_HTML
+    assert "white-space:pre-wrap" in _CODE_BLOCK_HTML
+    assert "overflow-wrap:break-word" in _CODE_BLOCK_HTML
+
+
+def test_pre_tag_wraps_to_container_width_at_multiple_sizes():
+    from PySide6.QtWidgets import QTextEdit
+    from gui.claude_chat_panel import _CODE_BLOCK_HTML
+    import re
+
+    real_text = (
+        "솔직히 말해서 선장들이 아직 저를 신뢰하지 않는 것 같습니다. 제가 뒤늦게 귀의했다는 건 알지만, "
+        "위대한 뱀을 섬기는 우리의 사명을 진심으로 믿고 있습니다. 매일 일을 시작하기 전에 기도하고 있고, "
+        "찬송가를 암기하기 위해 할 수 있는 모든 노력을 다했습니다. 제가 무엇을 더 해야 합니까?"
+    )
+    html = re.sub(r"```\n?(.*?)\n?```", _CODE_BLOCK_HTML, f"```\n{real_text}\n```", flags=re.DOTALL)
+
+    for width in (320, 500, 780):
+        te = QTextEdit()
+        te.resize(width, 400)
+        te.show()
+        QApplication.processEvents()
+        te.setHtml(html)
+        QApplication.processEvents()
+        doc = te.document()
+        doc.setTextWidth(te.viewport().width())
+        hbar = te.horizontalScrollBar()
+        assert hbar.maximum() == hbar.minimum(), f"horizontal scroll needed at width={width}"
+
+
+def test_pre_tag_without_wrap_style_reproduces_the_bug():
+    # Sanity check on the test methodology itself: the OLD style (no
+    # white-space declared) must actually fail this same check, confirming
+    # the test would have caught the original bug rather than passing
+    # regardless of the fix.
+    from PySide6.QtWidgets import QTextEdit
+    import re
+
+    OLD_STYLE = (
+        r'<pre style="background:rgba(30,41,59,0.8);border-radius:4px;padding:6px;'
+        r'margin:4px 0;color:#a7f3d0;">\1</pre>'
+    )
+    real_text = (
+        "솔직히 말해서 선장들이 아직 저를 신뢰하지 않는 것 같습니다. 제가 뒤늦게 귀의했다는 건 알지만, "
+        "위대한 뱀을 섬기는 우리의 사명을 진심으로 믿고 있습니다."
+    )
+    html = re.sub(r"```\n?(.*?)\n?```", OLD_STYLE, f"```\n{real_text}\n```", flags=re.DOTALL)
+
+    te = QTextEdit()
+    te.resize(500, 400)
+    te.show()
+    QApplication.processEvents()
+    te.setHtml(html)
+    QApplication.processEvents()
+    doc = te.document()
+    doc.setTextWidth(te.viewport().width())
+    hbar = te.horizontalScrollBar()
+    assert hbar.maximum() > hbar.minimum()
+
+
+# ── Response language + register-check prompt content ───────────────────────
+
+def test_review_prompt_requests_korean_response():
+    from gui.claude_client import ClaudeClient
+
+    client = ClaudeClient.__new__(ClaudeClient)
+    client.model = "claude-sonnet-4-6"
+    captured = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class R:
+                content = [type("C", (), {"text": "VERDICT: GOOD"})()]
+            return R()
+
+    client._client = type("C", (), {"messages": FakeMessages()})()
+    client.review_translation("Open the door.", "문을 여십시오.", "en", "ko")
+    sys_text = captured["system"][0]["text"]
+    assert "Korean" in sys_text and "한국어" in sys_text
+
+
+def test_review_prompt_requests_register_check():
+    from gui.claude_client import ClaudeClient
+
+    client = ClaudeClient.__new__(ClaudeClient)
+    client.model = "claude-sonnet-4-6"
+    captured = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class R:
+                content = [type("C", (), {"text": "VERDICT: GOOD"})()]
+            return R()
+
+    client._client = type("C", (), {"messages": FakeMessages()})()
+    client.review_translation("Open the door.", "문을 여십시오.", "en", "ko")
+    sys_text = captured["system"][0]["text"]
+    assert "반말" in sys_text and "존댓말" in sys_text
+
+
+def test_suggest_prompt_requests_korean_commentary_and_register_check():
+    panel = ClaudeChatPanel()
+    panel.set_current_string(1, "Open the door.", "", source_lang="en", target_lang="ko")
+    prompt = panel._system_prompt()
+    assert "Korean" in prompt and "한국어" in prompt
+    assert "반말" in prompt and "존댓말" in prompt
