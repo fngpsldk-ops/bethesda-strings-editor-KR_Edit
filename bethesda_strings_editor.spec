@@ -3,7 +3,7 @@
 # Build:
 #   pyinstaller bethesda_strings_editor.spec
 #
-# Produces dist/bethesda-strings-editor/ — zip this directory for distribution.
+# Produces dist/bethesda-strings-editor-KOR/ — zip this directory for distribution.
 # The GitHub Actions release workflow (`.github/workflows/release.yml`) runs
 # this automatically on every `v*` tag push.
 
@@ -59,7 +59,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='bethesda-strings-editor',
+    name='bethesda-strings-editor-KOR',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -80,7 +80,7 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name='bethesda-strings-editor',
+    name='bethesda-strings-editor-KOR',
 )
 
 # ── Seed default TM/cache/glossary as a TRUE SIBLING of the .exe ───────────
@@ -108,7 +108,7 @@ coll = COLLECT(
 import shutil
 from pathlib import Path as _Path
 
-_dist_root = _Path(DISTPATH) / 'bethesda-strings-editor'
+_dist_root = _Path(DISTPATH) / 'bethesda-strings-editor-KOR'
 _seed_src  = _Path('PortableData') / 'Config'
 _seed_dst  = _dist_root / 'PortableData' / 'Config'
 _seed_dst.mkdir(parents=True, exist_ok=True)

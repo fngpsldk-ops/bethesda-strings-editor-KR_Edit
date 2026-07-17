@@ -60,17 +60,17 @@ NVIDIA GPU + 최소 8GB VRAM을 권장하며, 아래 [추천 Ollama 모델](#추
 
 ### 1. BSEK 다운로드
 
-[Releases](../../releases) 페이지에서 최신 버전의 `bethesda-strings-editor-windows-x64.zip`을
+[Releases](../../releases) 페이지에서 최신 버전의 `bethesda-strings-editor-KOR-windows-x64.zip`을
 받아 원하는 폴더에 압축을 풉니다. 압축 해제 후 구조는 다음과 같습니다:
 
 ```
-bethesda-strings-editor\
-├─ bethesda-strings-editor.exe   ← 이걸 더블클릭해서 실행
+bethesda-strings-editor-KOR\
+├─ bethesda-strings-editor-KOR.exe   ← 이걸 더블클릭해서 실행
 ├─ PortableData\                  ← 설정·캐시·용어집이 여기 저장됨 (폴더째 옮겨도 그대로 동작)
 └─ (기타 실행에 필요한 파일들)
 ```
 
-Python이나 별도 런타임 설치가 필요 없습니다. `bethesda-strings-editor.exe`를
+Python이나 별도 런타임 설치가 필요 없습니다. `bethesda-strings-editor-KOR.exe`를
 더블클릭하면 바로 실행됩니다.
 
 > ⚠️ Windows Defender/백신이 처음 실행 시 경고를 띄울 수 있습니다 (서명되지 않은
