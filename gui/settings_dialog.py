@@ -945,16 +945,13 @@ class SettingsDialog(QDialog):
         self.chk_enable_ai_qc.setChecked(getattr(self._settings, "enable_ai_qc", False))
         self.chk_enable_ai_qc.setToolTip(
             self.tr(
-                "Run the fine-tuned qcgemma4-st Ollama model on each translated string\n"
-                "after the rule-based quality check. Slower but catches issues the rules miss.\n"
-                "Requires the model to be registered: ollama create qcgemma4-st -f Modelfile.qc"
+                "Run the Ollama model currently selected above (Ollama AI 설정 → 모델) "
+                "on each translated string after the rule-based quality check.\n"
+                "Slower but catches issues the rules miss. Uses whatever model you're "
+                "already translating with, so no separate model needs to be pulled."
             )
         )
         ai_qc_layout.addRow(self.chk_enable_ai_qc)
-
-        self.ai_qc_model_edit = QLineEdit(getattr(self._settings, "ai_qc_model", "qcgemma4-st"))
-        self.ai_qc_model_edit.setToolTip(self.tr("Ollama model name for AI quality checks"))
-        ai_qc_layout.addRow(self.tr("AI QC model:"), self.ai_qc_model_edit)
 
         self.chk_auto_self_review = QCheckBox(
             self.tr("Automatic self-review after translation")
@@ -1940,7 +1937,6 @@ class SettingsDialog(QDialog):
         settings.encrypt_cache = self.chk_encrypt_cache.isChecked()
         settings.audit_logging = self.chk_audit_log.isChecked()
         settings.enable_ai_qc = self.chk_enable_ai_qc.isChecked()
-        settings.ai_qc_model = self.ai_qc_model_edit.text().strip() or "qcgemma4-st"
         settings.auto_self_review = self.chk_auto_self_review.isChecked()
         settings.enable_lore_rag = self.chk_enable_lore_rag.isChecked()
         settings.lore_rag_max_snippet_chars = self.lore_rag_max_chars_spin.value()

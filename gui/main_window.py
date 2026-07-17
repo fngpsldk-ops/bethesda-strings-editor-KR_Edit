@@ -3066,7 +3066,19 @@ class MainWindow(QMainWindow):
         row still holds the old (possibly wrong) result -- the request never
         even reaches the worker. This clears the translated text for the
         selected rows first, then hands off to the normal translate flow,
-        which will now actually run them."""
+        which will now actually run them.
+
+        force_retranslate=True additionally makes the worker bypass its
+        translation-cache READ (and evict the stale entry) for these rows.
+        Without it, clearing the row's own text was not enough: the worker
+        would still find the exact same value sitting in the separate
+        translation-cache store and silently re-serve it with zero fresh API
+        call, making this whole feature a no-op whenever a cache hit existed
+        (confirmed: this is the common case, since a previous batch is what
+        populated the cache in the first place). The fresh result that comes
+        back then overwrites that cache entry, same as it does for a normal
+        translation.
+        """
         indices = [idx.row() for idx in self.table_view.selectionModel().selectedRows()]
         if not indices:
             QMessageBox.information(
@@ -3075,7 +3087,7 @@ class MainWindow(QMainWindow):
             return
         for idx in indices:
             self.table_model.set_translated_text(idx, "")
-        self.translate_selected()
+        self.translate_selected(force_retranslate=True)
 
     def _propagate_translation_to_duplicates(self):
         """Copy the (single) selected row's translation to every other row
@@ -3140,7 +3152,7 @@ class MainWindow(QMainWindow):
             5000,
         )
 
-    def translate_selected(self):
+    def translate_selected(self, force_retranslate: bool = False):
         """Translate selected strings with auto-term detection."""
         if not self.current_file:
             return
@@ -3188,7 +3200,7 @@ class MainWindow(QMainWindow):
                 )
 
         self._self_review_enabled_for_batch = False
-        self._start_translation(indices)
+        self._start_translation(indices, force_retranslate=force_retranslate)
 
     @Slot()
     def translate_all(self):
@@ -3200,8 +3212,16 @@ class MainWindow(QMainWindow):
         self._self_review_enabled_for_batch = True
         self._start_translation(indices)
 
-    def _start_translation(self, indices):
-        """Start translation batch."""
+    def _start_translation(self, indices, force_retranslate: bool = False):
+        """Start translation batch.
+
+        *force_retranslate*: set by _force_retranslate_selected (Ctrl+Alt+T).
+        Threaded through to each TranslationRequest so the worker bypasses
+        its translation-cache read (and evicts the stale entry) for these
+        rows -- without this, a cache hit would silently re-serve the exact
+        same (possibly wrong) cached text with zero fresh API call, making
+        Force Retranslate a no-op whenever a cache entry already existed.
+        """
         logger.info("[DIAG] _start_translation entered with %d indices", len(indices))
         self._translation_stopping = False
         source_lang = self.combo_source_lang.currentData()
@@ -3246,6 +3266,7 @@ class MainWindow(QMainWindow):
                     protected_terms_enabled=self.settings.enable_term_protection,
                     protect_english_text=protect_english,
                     context_note=row.get("context_note", ""),
+                    force_retranslate=force_retranslate,
                     # glossary_snippet computed on the worker thread to keep UI responsive
                 )
             )
@@ -4264,12 +4285,20 @@ class MainWindow(QMainWindow):
             if not translated_text:
                 return
             from gui.translation_cache import TranslationCache
+            # Per-string settings hash (matches what the workers read with):
+            # all three worker classes expose _settings_hash_for(). Fall back
+            # to the legacy global attribute only if a worker predates it.
+            hash_fn = getattr(self.ollama_worker, "_settings_hash_for", None)
+            if callable(hash_fn):
+                settings_hash = hash_fn(original_text)
+            else:
+                settings_hash = getattr(self.ollama_worker, "_settings_hash", "")
             key = TranslationCache.make_key(
                 original_text,
                 getattr(self.ollama_worker, "model", ""),
                 getattr(self.ollama_worker, "source_lang", self.settings.default_source_lang),
                 getattr(self.ollama_worker, "target_lang", self.settings.default_target_lang),
-                getattr(self.ollama_worker, "_settings_hash", ""),
+                settings_hash,
             )
             self.translation_cache.set(key, translated_text)
         except Exception as exc:
@@ -4893,7 +4922,15 @@ class MainWindow(QMainWindow):
         worker = AiQcWorker(
             items,
             ollama_url=self.settings.ollama_url,
-            model=getattr(self.settings, "ai_qc_model", "qcgemma4-st"),
+            # Use whatever Ollama model is currently selected for translation
+            # (settings.ollama_model), not a separate fixed default. The old
+            # default ("qcgemma4-st") was a specially fine-tuned QC-only
+            # model from the upstream Ukrainian project that most users --
+            # including anyone on the KR fork -- never actually have pulled
+            # in Ollama, silently making this feature error out or no-op.
+            # Reusing the model already loaded for translation guarantees it
+            # exists locally and needs no separate setup.
+            model=self.settings.ollama_model,
             max_workers=4,
         )
         loop = QEventLoop()

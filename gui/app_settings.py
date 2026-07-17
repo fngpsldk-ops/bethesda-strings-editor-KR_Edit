@@ -179,6 +179,11 @@ class AppSettings:
 
     # ── AI Quality Check ──────────────────────────────────────────────────────
     enable_ai_qc: bool = False
+    # Deprecated / unused: AI QC now always uses ollama_model (whatever is
+    # currently selected for translation) instead of a separately configured
+    # QC-only model. Kept here only so old config.json files with this key
+    # still deserialize without error; the settings dialog no longer exposes
+    # a field for it and nothing reads it anymore.
     ai_qc_model: str = "qcgemma4-st"
 
     # Automatic post-translation self-review: after each batch, silently auto-fix
