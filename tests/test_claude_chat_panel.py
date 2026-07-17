@@ -571,3 +571,62 @@ def test_pick_suggestion_dialog_accept_returns_selected_block():
         result = panel._pick_suggestion(blocks)
     # Default selection is row 0 unless the person clicks another row.
     assert result == "번역 A"
+
+
+# ── Review-suggestion self-consistency ───────────────────────────────────────
+# Real-world case (verified NOT a code bug): review_translation() correctly
+# separates the source and target text in the API payload -- confirmed by
+# inspecting the exact message sent, "Space" never appears in the Original
+# section. The actual defect was Claude's own response being internally
+# inconsistent: it flagged "[Space]" as an unwarranted addition not present
+# in the source, then left "[Space]" in its own suggested rewrite anyway.
+# Fixed by explicitly requiring the improved-translation code block to
+# resolve every issue listed above it.
+
+def test_review_prompt_requires_suggestion_to_resolve_listed_issues():
+    from gui.claude_client import ClaudeClient
+
+    client = ClaudeClient.__new__(ClaudeClient)
+    client.model = "claude-haiku-4-5"
+    captured = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class R:
+                content = [type("C", (), {"text": "VERDICT: GOOD"})()]
+            return R()
+
+    client._client = type("C", (), {"messages": FakeMessages()})()
+    client.review_translation("Open the door.", "문을 여십시오.", "en", "ko")
+    user_msg = captured["messages"][0]["content"]
+    assert "resolve every issue" in user_msg
+    assert "don't flag something as wrong" in user_msg
+
+
+def test_review_payload_never_mixes_source_and_translation():
+    # Direct verification of the real-world "Space" case: the source and
+    # target sections in the actual API payload must stay cleanly separated
+    # no matter what content differs between them.
+    from gui.claude_client import ClaudeClient
+
+    client = ClaudeClient.__new__(ClaudeClient)
+    client.model = "claude-haiku-4-5"
+    captured = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class R:
+                content = [type("C", (), {"text": "VERDICT: GOOD"})()]
+            return R()
+
+    client._client = type("C", (), {"messages": FakeMessages()})()
+    original = "Toggle Open Menu When Sitting in Pilot Seat"
+    translation = "조종실에 앉아 있을 때 [Open] [Menu]를 [전환]하려면 [Space]를 누르십시오"
+    client.review_translation(original, translation, "en", "ko")
+
+    user_msg = captured["messages"][0]["content"]
+    original_section = user_msg.split("Translation (")[0]
+    assert "Space" not in original_section
+    assert original in original_section

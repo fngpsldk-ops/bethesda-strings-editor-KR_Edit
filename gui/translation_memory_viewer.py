@@ -38,7 +38,15 @@ _MAX_DISPLAYED_ROWS = 500
 class _TmTableModel(QAbstractTableModel):
     """Lightweight read-only model over a list of (source, translation) pairs."""
 
-    HEADERS = ["Original", "Translated"]
+    # NOT translatable as a class-level literal -- self.tr() needs an
+    # instance (self) to resolve the right translation context, which
+    # doesn't exist yet at class-definition time. This is exactly why these
+    # two column headers stayed in English even after every other string in
+    # this dialog had a Korean translation available: they were never
+    # wrapped in tr() at all, so lupdate could never even discover them as
+    # translatable text, regardless of what the .ts file contained. Resolved
+    # per-call in headerData() below instead.
+    _HEADER_KEYS = ["Original", "Translated"]
 
     def __init__(self, rows: list[tuple[str, str]], parent=None):
         super().__init__(parent)
@@ -52,7 +60,8 @@ class _TmTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return self.HEADERS[section]
+            labels = [self.tr("Original"), self.tr("Translated")]
+            return labels[section]
         return None
 
     def data(self, index: QModelIndex, role=Qt.DisplayRole):

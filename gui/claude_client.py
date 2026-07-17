@@ -291,6 +291,17 @@ class ClaudeClient:
         this build) — previously it defaulted to English with no language
         directive at all.
 
+        The prompt also requires the improved-translation code block to
+        actually resolve every issue listed above it. Confirmed real-world
+        failure without this: a review correctly flagged "[Space]" as an
+        unwarranted addition not present in the source, then its own
+        suggested rewrite left "[Space]" in anyway — a self-contradiction
+        within one response (verified by inspecting the exact API payload:
+        the source/translation fields were correctly separated and neither
+        was swapped or duplicated, so this was never a code-level mix-up of
+        original vs. translated text — it's the model not cross-checking its
+        own fix against its own analysis).
+
         Returns a human-readable review string.
         """
         from gui.ollama_worker import _LANG_DISPLAY  # type: ignore[attr-defined]
@@ -331,7 +342,12 @@ class ClaudeClient:
             f"(Poor / Fair / Good / Excellent), "
             f"and if an improved version is needed, provide it wrapped in a code "
             f"block on its own (```\\n<translation>\\n```) so it can be applied "
-            f"directly."
+            f"directly. The improved version must actually resolve every issue "
+            f"you just listed — don't flag something as wrong in your analysis "
+            f"and then leave that exact same problem sitting in your own "
+            f"suggested rewrite. Before finalizing your answer, check the "
+            f"code block against each numbered issue above it and fix any that "
+            f"still apply."
         )
 
         response = self._client.messages.create(
