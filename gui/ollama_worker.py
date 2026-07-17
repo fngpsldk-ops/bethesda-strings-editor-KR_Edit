@@ -18,6 +18,7 @@ import requests
 from PySide6.QtCore import QMutex, QMutexLocker, QObject, Signal, Slot
 
 from gui.en_word_checker import preload as _preload_en_dict
+from gui.ko_word_checker import preload as _preload_ko_dict
 from gui.ru_word_checker import preload as _preload_ru_dict, text_has_russian_words
 from gui.uk_word_checker import preload as _preload_uk_dict
 from gui.de_word_checker import preload as _preload_de_dict
@@ -1031,15 +1032,29 @@ class OllamaWorker(QObject):
         )
         # Preload word dictionaries in the background to avoid blocking the
         # first translation request on dictionary load time.
-        _preload_ru_dict()
+        #
+        # This fork only ever translates en->ko (see README: supported
+        # languages are en/ko, ja is reference-only) -- but this call site
+        # was unconditionally preloading every dictionary the ORIGINAL
+        # multi-language upstream project supports (ru/uk/de/es/fr/it/pl/
+        # pt-br), including Russian's 1.5M-word list alone (~101MB, ~1.8s).
+        # Confirmed in a real startup log: ~5.9s and 100+MB spent loading
+        # eight dictionaries this fork's translation/quality-check paths
+        # never consult for an en->ko string. Meanwhile Korean -- the actual
+        # target language, whose dictionary genuinely IS used by the
+        # LOW_TARGET_COVERAGE/LOW_SCRIPT_COVERAGE quality checks -- wasn't
+        # in this list at all, so it always paid a first-use load stutter
+        # instead of being warmed up here where it belongs.
+        #
+        # ru/uk/de/es/fr/it/pl/pt-br dictionaries are NOT removed from the
+        # codebase -- quality_checker.py still imports and uses them lazily,
+        # on demand, for the language pairs that need them (a Ukrainian
+        # target string, for instance, still gets its own dictionary loaded
+        # the first time that specific check actually runs). Only the
+        # blanket eager preload of dictionaries this fork's language pair
+        # never needs is removed here.
         _preload_en_dict()
-        _preload_uk_dict()
-        _preload_de_dict()
-        _preload_es_dict()
-        _preload_fr_dict()
-        _preload_it_dict()
-        _preload_pl_dict()
-        _preload_ptbr_dict()
+        _preload_ko_dict()
 
     def _compute_settings_hash(self) -> str:
         """Refresh the string-independent hash components and return the
