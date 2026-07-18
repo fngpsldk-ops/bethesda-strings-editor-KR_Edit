@@ -488,7 +488,19 @@ class TranslationMemory:
         return dict(self._id_src)
 
     def __len__(self) -> int:
-        return len(self._by_id)
+        # TXT/JSON loads populate _by_id and _by_src 1:1 (same entries in
+        # both), so summing would double-count. TMX loads only ever populate
+        # _by_src (TMX carries no Bethesda string ID). max() reports the
+        # correct total in both cases without needing to cross-reference
+        # which _by_src keys came from which loader.
+        return max(len(self._by_id), len(self._by_src))
 
     def __bool__(self) -> bool:
-        return bool(self._by_id)
+        # NOTE: must check _by_src too, not just _by_id. load_tmx() never
+        # populates _by_id (TMX has no Bethesda string ID), so a TMX-only TM
+        # used to evaluate as falsy here even with 100k+ entries in _by_src.
+        # Since this __bool__ gates `if self.translation_memory:` in every
+        # worker (ollama_worker.py, openai_compat_worker.py) as well as the
+        # TM viewer/status indicator, that meant a TMX-loaded TM was silently
+        # never consulted during translation, not just invisible in the UI.
+        return bool(self._by_id) or bool(self._by_src)
