@@ -119,3 +119,15 @@ for _fname in ('glossary.json', 'translation_cache.json', 'translation_memory.js
         print(f"[seed] copied {_src_file} -> {_seed_dst / _fname}")
     else:
         print(f"[seed] WARNING: {_src_file} not found, skipping")
+
+# CHANGES.md ships next to the exe (same sibling-level convention as
+# PortableData above, and for the same reason: the app resolves it relative
+# to sys.executable's parent, not _internal). It drives both the welcome
+# screen's "What's New" panel and the version fallback for local builds
+# where _version.py is still the "dev" placeholder (gui/app_version.py).
+_changes_src = _Path('CHANGES.md')
+if _changes_src.exists():
+    shutil.copy2(_changes_src, _dist_root / 'CHANGES.md')
+    print(f"[seed] copied {_changes_src} -> {_dist_root / 'CHANGES.md'}")
+else:
+    print("[seed] WARNING: CHANGES.md not found, skipping")

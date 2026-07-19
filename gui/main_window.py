@@ -299,20 +299,34 @@ class _WelcomeWidget(QWidget):
         QTimer.singleShot(400, lambda: start_card_pulse(card))
 
     def load_changelog(self) -> None:
-        """Show the What's New panel with a static BSEK changelog entry.
+        """Show the What's New panel from the bundled CHANGES.md.
 
         BSEK note: this used to fetch release notes live from GitHub — but
         it was pointed at the ORIGINAL upstream project's releases
         (0xra0/bethesda-strings-editor), not this fork, so it was showing
-        unrelated changes (and the update-checker could have prompted an
-        "update" that would silently replace this fork's Korean/Gemini/
-        Prompt-Editor work with vanilla upstream). Now hardcoded to this
-        fork's own v1.0.0_KR changelog instead of a live network fetch.
+        unrelated changes. It was then hardcoded to a static HTML snippet,
+        which meant every release required editing this file by hand (and
+        in practice it silently went stale). Now it parses CHANGES.md —
+        which IS updated every release and ships next to the exe (see the
+        spec's post-COLLECT copy) — so the panel stays current
+        automatically. The static snippet remains only as a last-resort
+        fallback if CHANGES.md is missing or unparseable.
         """
-        from gui.updater import RELEASES_URL
+        from gui.updater import RELEASES_URL, changelog_to_html
+        from gui.app_version import load_local_changelog
 
         self._changelog_panel.setVisible(True)
-        self._changelog_view.setHtml(_BSEK_CHANGELOG_HTML)
+
+        releases = load_local_changelog(limit=6)
+        if releases:
+            for rel in releases:
+                rel["url"] = RELEASES_URL
+            app = QApplication.instance()
+            current = (app.applicationVersion() or "") if app is not None else ""
+            self._changelog_view.setHtml(changelog_to_html(releases, current))
+        else:
+            self._changelog_view.setHtml(_BSEK_CHANGELOG_HTML)
+
         self._changelog_view.verticalScrollBar().setValue(0)
         self._changelog_footer.setText(
             f"<a href='{RELEASES_URL}'>{self.tr('All releases on GitHub →')}</a>"
@@ -543,7 +557,7 @@ class MainWindow(QMainWindow):
             theme_manager: ThemeManager instance for theme switching.
         """
         super().__init__(parent)
-        self.setWindowTitle(self.tr("Bethesda Strings AI Translator"))
+        self.setWindowTitle(self._base_window_title())
         self.setMinimumSize(1200, 700)
 
         # State variables
@@ -7276,9 +7290,20 @@ class MainWindow(QMainWindow):
                     self._session_store.delete(s.name)
             self._populate_recent_sessions()
 
+    def _base_window_title(self) -> str:
+        """App name + version for the title bar. Version comes from
+        QApplication.applicationVersion(), which main.py sets from the
+        resolver (CI-stamped _version.py, else bundled CHANGES.md's newest
+        section, else "dev")."""
+        base = self.tr("Bethesda Strings AI Translator")
+        ver = self._current_version()
+        if ver and ver != "dev":
+            return f"{base} v{ver}"
+        return f"{base} (dev)"
+
     def _update_session_title(self) -> None:
         """Append session name to the window title."""
-        base = self.tr("Bethesda Strings AI Translator")
+        base = self._base_window_title()
         if self.current_path:
             base = f"{Path(self.current_path).name} — {base}"
         if self._current_session:
@@ -7599,10 +7624,11 @@ class MainWindow(QMainWindow):
 
     def _show_about_dialog(self):
         """Show About dialog."""
-        try:
-            from _version import __version__
-        except ImportError:
-            __version__ = "dev"
+        # Same source as the title bar / update checker — the Qt application
+        # version set by main.py from the resolver — instead of importing
+        # _version directly (which is still the "dev" placeholder in local
+        # builds even when CHANGES.md knows the real version).
+        __version__ = self._current_version()
 
         import sys
         from PySide6 import __version__ as pyside_version
