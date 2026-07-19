@@ -138,3 +138,61 @@ def test_full_file_roundtrip_weap_name_field_not_corrupted(tmp_path: Path):
     # ends up holding a modification-grade string instead of its name.
     assert got[0] == "[이름번역]", f"weapon name field corrupted, got {got!r}"
     assert got == ["[이름번역]", "[등급1번역]", "[등급2번역]"]
+
+
+# ── save()'s own occ counter must also advance for untranslated entries ────
+#
+# Separate bug, same symptom: EspFile.save() only incremented its local
+# occurrence counter for entries that were actually retranslated
+# (`entry.translation != entry.original`). A proper noun kept as-is (e.g. a
+# weapon literally named "ARX-15", translation == original) doesn't
+# increment the counter, so the *next* real translation silently gets
+# assigned the untranslated entry's occurrence index -- shifting every
+# following same-signature translation in that record by one slot, and
+# dropping the last one off the end entirely. This exactly reproduces the
+# real-world ARX-15 WEAP bug report (weapon name field ended up holding the
+# "Fallback" grade-name translation).
+
+def test_save_occurrence_counter_advances_for_untranslated_entries(tmp_path: Path):
+    tes4 = (b"TES4" + struct.pack("<I", 0) + struct.pack("<I", 0) + struct.pack("<I", 0)
+            + struct.pack("<I", 0) + struct.pack("<H", 0) + struct.pack("<H", 0))
+
+    # Mirrors the real ARX-15 WEAP FULL chain: name (kept as-is) then 10
+    # grade names (all translated).
+    body = (
+        _sub("EDID", "AR-15")
+        + _sub("FULL", "ARX-15")
+        + _sub("FULL", "Fallback")
+        + _sub("FULL", "Standard Low")
+        + _sub("FULL", "Standard Med")
+    )
+    weap_rec = (b"WEAP" + struct.pack("<I", len(body)) + struct.pack("<I", 0)
+                + struct.pack("<I", 0x01000806) + struct.pack("<I", 0)
+                + struct.pack("<H", 0) + struct.pack("<H", 0) + body)
+
+    src = tmp_path / "ARX-15.esm"
+    src.write_bytes(tes4 + weap_rec)
+
+    ef = EspFile()
+    ef.load(src, encoding="utf-8")
+
+    by_text = {e.original: e for e in ef.strings}
+    # "ARX-15" is a proper noun: translated text equals the original.
+    by_text["ARX-15"].translation = "ARX-15"
+    by_text["Fallback"].translation = "폴백"
+    by_text["Standard Low"].translation = "표준(저)"
+    by_text["Standard Med"].translation = "표준(중간)"
+
+    out = tmp_path / "ARX-15_translated.esm"
+    ef.save(out, encoding="utf-8")
+
+    ef2 = EspFile()
+    ef2.load(out, encoding="utf-8")
+    got = [e.original for e in ef2.strings]
+
+    # Without the fix this comes out as
+    # ["폴백", "표준(저)", "표준(중간)"] with "ARX-15" silently deleted and
+    # "Standard Med" left untranslated (shifted off the end).
+    assert got == ["ARX-15", "폴백", "표준(저)", "표준(중간)"], (
+        f"occurrence indices desynced when an entry was left untranslated, got {got!r}"
+    )

@@ -403,13 +403,24 @@ class EspFile:
             )
 
         # Build translation map: (form_id, field_sig, occurrence) → translated text
+        #
+        # IMPORTANT: `occ` must advance for every entry in self.strings, not
+        # only ones that actually changed. self.strings is in physical file
+        # order (see _parse_record), and _patch_fields()'s own occ_counter
+        # advances for every physical occurrence unconditionally. If an
+        # entry is left untranslated (translation == original — common for
+        # proper nouns/brand names kept as-is, e.g. a weapon named "ARX-15"),
+        # skipping the counter increment here desyncs this index from
+        # _patch_fields()'s, and every later same-signature occurrence in
+        # that record silently shifts onto the wrong field (see: ARX-15
+        # WEAP's own name field ending up with a modification-grade string).
         trans_map: dict[tuple[int, str, int], str] = {}
         occ: dict[tuple[int, str], int] = {}
         for entry in self.strings:
+            key2 = (entry.form_id, entry.field_sig)
+            idx  = occ.get(key2, 0)
+            occ[key2] = idx + 1
             if entry.translation and entry.translation != entry.original:
-                key2 = (entry.form_id, entry.field_sig)
-                idx  = occ.get(key2, 0)
-                occ[key2] = idx + 1
                 trans_map[(entry.form_id, entry.field_sig, idx)] = entry.translation
 
         # Fast set of form_ids that have any translation (for O(1) lookup in _write_chunks)
