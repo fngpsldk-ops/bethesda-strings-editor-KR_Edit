@@ -344,16 +344,12 @@ class EspFile:
                     ))
                 continue
 
-            # Non-localized: null-terminated text
-            raw = fdata.rstrip(b"\x00")
-            if not raw:
-                continue
-            try:
-                text = raw.decode(encoding, errors="replace")
-            except Exception:
-                text = raw.decode("latin-1", errors="replace")
-
-            if _looks_like_resource_path(text):
+            # Non-localized: null-terminated text. Must use the same
+            # occurrence-counting predicate as _patch_fields() (see
+            # _field_translatable_text docstring) or repeated same-signature
+            # fields in one record (e.g. WEAP's FULL chain) drift apart.
+            text = _field_translatable_text(fdata, encoding)
+            if text is None:
                 continue
 
             note = ""
@@ -521,6 +517,35 @@ def _looks_like_resource_path(text: str) -> bool:
     return " " not in text
 
 
+def _field_translatable_text(fdata: bytes, encoding: str) -> Optional[str]:
+    """Decide whether a non-localized field occurrence counts as translatable,
+    and return its decoded text if so (else None).
+
+    CRITICAL: this is the single source of truth for "does this occurrence
+    count", and MUST be called identically by both _parse_record()
+    (extraction) and _patch_fields() (write-back). A record can contain the
+    same field signature many times (e.g. a WEAP's FULL appears once for the
+    weapon's own name and again for every OBTE/OBTF modification-grade
+    label), and both sides line entries up purely by "the Nth occurrence of
+    this signature in this record". If extraction skips an occurrence
+    (empty, or looks like a resource path) that write-back does NOT
+    equally skip, every later occurrence in that record silently shifts by
+    one slot and gets the wrong translation written into it — see the
+    ARX-15 WEAP FULL-chain bug (weapon name field ended up containing a
+    modification-grade string instead of the weapon's name).
+    """
+    raw = fdata.rstrip(b"\x00")
+    if not raw:
+        return None
+    try:
+        text = raw.decode(encoding, errors="replace")
+    except Exception:
+        text = raw.decode("latin-1", errors="replace")
+    if _looks_like_resource_path(text):
+        return None
+    return text
+
+
 def _field_list_index(
     field_sig: str, rec_sig: str
 ) -> Optional[tuple[int, int]]:
@@ -587,7 +612,14 @@ def _patch_fields(
             _, proc_id = result
             if proc_id == 1 and not edid.startswith("s"):
                 pass  # GMST proc: skip if EDID doesn't start with 's'
-            elif fdata and fdata != b"\x00":
+            elif _field_translatable_text(fdata, encoding) is not None:
+                # Same predicate as _parse_record() — see
+                # _field_translatable_text docstring. Previously this used a
+                # looser check (`fdata and fdata != b"\x00"`) that counted
+                # occurrences extraction had skipped (empty-with-padding, or
+                # resource-path-like text), silently shifting every later
+                # same-signature translation in the record onto the wrong
+                # field.
                 key2 = (form_id, fsig_str)
                 idx  = occ_counter.get(key2, 0)
                 occ_counter[key2] = idx + 1
